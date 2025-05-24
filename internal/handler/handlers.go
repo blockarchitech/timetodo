@@ -261,8 +261,8 @@ type TodoistWebhookPayload struct {
 // TodoistDueDate represents the due date object from Todoist API
 type TodoistDueDate struct {
 	Date        string `json:"date,omitempty"`
-	Datetime    string `json:"datetime,omitempty"`
 	String      string `json:"string"`
+	Lang        string `json:"lang,omitempty"`
 	Timezone    string `json:"timezone,omitempty"`
 	IsRecurring bool   `json:"is_recurring"`
 }
@@ -451,22 +451,11 @@ func parseTodoistDueDateTime(due *TodoistDueDate) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("due object is nil")
 	}
 
-	// Try parsing RFC3339 (datetime) first
-	if due.Datetime != "" {
-		parsedTime, err := time.Parse(time.RFC3339, due.Datetime)
-		if err == nil {
-			return parsedTime, nil
-		}
-		// If timezone is present, try parsing with timezone explicitly
-		// Todoist 'datetime' is usually UTC if 'timezone' is null, or in specified timezone if 'timezone' is not null.
-		// The time.RFC3339 format handles 'Z' for UTC and timezone offsets like '-07:00'.
-		// If due.Timezone is not nil and not UTC, the `due.Datetime` should already be in that timezone or be UTC.
-		// For simplicity, we rely on RFC3339 parsing. If specific timezone logic is needed beyond what RFC3339 handles,
-		// it would need to be added here, possibly using time.LoadLocation.
-	}
-
-	// Try parsing YYYY-MM-DD (date) next
 	if due.Date != "" {
+		rfcDate, err := time.Parse(time.RFC3339, due.Date)
+		if err == nil {
+			return rfcDate, nil
+		}
 		// If it's just a date, assume it's for the start of that day in the user's local timezone (or UTC if not specified).
 		// For simplicity, parsing as is. If a specific time (e.g., midnight) is needed, adjust accordingly.
 		layout := "2006-01-02"
