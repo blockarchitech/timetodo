@@ -84,7 +84,7 @@ func (s *FirestoreTokenStore) GetTokensByPebbleAccount(ctx context.Context, pebb
 }
 
 func (s *FirestoreTokenStore) GetTokensByTodoistUserID(ctx context.Context, todoistUserID int64) (UserTokens, bool, error) {
-	iter := s.client.Collection(s.collectionName).Where("TodoistUserID", "==", todoistUserID).Limit(1).Documents(ctx)
+	iter := s.client.Collection(s.collectionName).Where("todoistUserID", "==", todoistUserID).Limit(1).Documents(ctx)
 	defer iter.Stop()
 
 	dsnap, err := iter.Next()
@@ -107,7 +107,7 @@ func (s *FirestoreTokenStore) GetTokensByTodoistUserID(ctx context.Context, todo
 }
 
 func (s *FirestoreTokenStore) DeleteTokensByTodoistUserID(ctx context.Context, id int64) error {
-	iter := s.client.Collection(s.collectionName).Where("TodoistUserID", "==", id).Limit(1).Documents(ctx)
+	iter := s.client.Collection(s.collectionName).Where("todoistUserID", "==", id).Limit(1).Documents(ctx)
 	defer iter.Stop()
 
 	dsnap, err := iter.Next()
