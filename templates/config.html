@@ -45,7 +45,7 @@
     }
 
     function doLogin() {
-        const loginUrl = `/auth/todoist/login?timeline_token=${encodeURIComponent(pebbleTimelineToken)}&account_token=${encodeURIComponent(pebbleAccountToken)}`;
+        const loginUrl = `/auth/todoist/login?pebble_timeline_token=${encodeURIComponent(pebbleTimelineToken)}&pebble_account_token=${encodeURIComponent(pebbleAccountToken)}`;
         if (pebbleTimelineToken && pebbleAccountToken) {
             window.location.href = loginUrl;
         } else {
