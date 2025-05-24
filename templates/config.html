@@ -64,7 +64,7 @@
         }
     }
 
-    if (!pebbleTimelineToken || !pebbleAccountToken) {
+    if (!pebbleTimelineToken || !pebbleAccountToken && !status) {
         statusMessageEl.textContent = 'Missing required tokens. Please open from Pebble app settings.';
         loginButtonEl.style.display = 'none';
     }

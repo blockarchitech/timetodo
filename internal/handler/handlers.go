@@ -161,9 +161,9 @@ func (h *HttpHandlers) HandleTodoistLogin(w http.ResponseWriter, r *http.Request
 	}
 	state := base64.URLEncoding.EncodeToString(b)
 
-	http.SetCookie(w, &http.Cookie{Name: oauthStateCookieName, Value: state, Path: "/", HttpOnly: true, Secure: r.TLS != nil, MaxAge: 300, SameSite: http.SameSiteStrictMode})
-	http.SetCookie(w, &http.Cookie{Name: oauthPebbleAccountTokenCookieName, Value: pebbleAccountToken, Path: "/", HttpOnly: true, Secure: r.TLS != nil, MaxAge: 300, SameSite: http.SameSiteStrictMode})
-	http.SetCookie(w, &http.Cookie{Name: oauthPebbleTimelineTokenCookieName, Value: pebbleTimelineToken, Path: "/", HttpOnly: true, Secure: r.TLS != nil, MaxAge: 300, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: oauthStateCookieName, Value: state, Path: "/", HttpOnly: true, Secure: r.TLS != nil, MaxAge: 300, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: oauthPebbleAccountTokenCookieName, Value: pebbleAccountToken, Path: "/", HttpOnly: true, Secure: r.TLS != nil, MaxAge: 300, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: oauthPebbleTimelineTokenCookieName, Value: pebbleTimelineToken, Path: "/", HttpOnly: true, Secure: r.TLS != nil, MaxAge: 300, SameSite: http.SameSiteLaxMode})
 
 	authURL := h.oauth2Config.AuthCodeURL(state)
 	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
@@ -183,7 +183,7 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 
 	stateCookie, err := r.Cookie(oauthStateCookieName)
 	if err != nil {
-		h.logger.Warn("OAuth state cookie not found")
+		h.logger.Warn("OAuth state cookie not found", zap.Error(err))
 		http.Error(w, "OAuth state cookie not found", http.StatusBadRequest)
 		return
 	}
