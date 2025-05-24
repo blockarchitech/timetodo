@@ -428,8 +428,16 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 
 // verifyTodoistSignature verifies the HMAC SHA256 signature of the Todoist webhook.
 func (h *HttpHandlers) verifyTodoistSignature(signatureHeader string, body []byte) bool {
+	// TL;DR: Todoist uses HMAC SHA256 for webhook signatures. It is encrypted using the Client Secret.
+	// If we can:
+	// 1. Decrypt the signature using the Client Secret
+	// 2. Recreate the HMAC SHA256 hash of the body
+	// 3. Decode the hmac from base64
+	// 4. Compare the two hashes
+	// then we can verify the signature.
 	mac := hmac.New(sha256.New, []byte(h.config.TodoistClientSecret))
-	mac.Write(body)
+	body64 := base64.StdEncoding.EncodeToString(body)
+	mac.Write([]byte(body64))
 	expectedMAC := hex.EncodeToString(mac.Sum(nil))
 	return hmac.Equal([]byte(signatureHeader), []byte(expectedMAC))
 }

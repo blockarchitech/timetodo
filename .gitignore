@@ -2,3 +2,6 @@
 /main
 /timetodo
 .idea/
+pebble/build
+pebble/.lock-waf_linux2_build
+config.yaml
