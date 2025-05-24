@@ -1,0 +1,79 @@
+{{define "title"}}Config{{end}}
+
+{{ define "content"}}
+<!--
+  ~    Copyright 2025 blockarchitech
+  ~
+  ~    Licensed under the Apache License, Version 2.0 (the "License");
+  ~    you may not use this file except in compliance with the License.
+  ~    You may obtain a copy of the License at
+  ~
+  ~        http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~    Unless required by applicable law or agreed to in writing, software
+  ~    distributed under the License is distributed on an "AS IS" BASIS,
+  ~    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~    See the License for the specific language governing permissions and
+  ~    limitations under the License.
+  -->
+
+<div class="container">
+    <h1>timetodo</h1>
+
+    <p id="message">Please wait.</p>
+
+    <div id="login-section" style="display: none;">
+        <p>Tap the button below to log in.</p>
+        <button id="login-button" class="button">Login with Todoist</button>
+    </div>
+
+    <div id="status-message" class="message"></div>
+
+</div>
+
+<script>
+    const queryParams = new URLSearchParams(window.location.search);
+    const pebbleTimelineToken = queryParams.get('timeline_token');
+    const pebbleAccountToken = queryParams.get('account_token');
+    const status = queryParams.get('status');
+    const error = queryParams.get('error');
+
+    const messageEl = document.getElementById('message');
+    const loginSectionEl = document.getElementById('login-section');
+    const loginButtonEl = document.getElementById('login-button');
+    const statusMessageEl = document.getElementById('status-message');
+
+    function closeConfig(data) {
+        const returnTo = queryParams.get('return_to') || 'pebblejs://close#';
+        document.location = returnTo + encodeURIComponent(JSON.stringify(data));
+    }
+
+    function doLogin() {
+        const loginUrl = `/auth/todoist?timeline_token=${encodeURIComponent(pebbleTimelineToken)}&account_token=${encodeURIComponent(pebbleAccountToken)}`;
+        if (pebbleTimelineToken && pebbleAccountToken) {
+            window.location.href = loginUrl;
+        } else {
+            statusMessageEl.textContent = 'Missing required tokens. Please open from Pebble app settings.';
+            messageEl.style.display = 'none';
+        }
+    }
+
+    loginButtonEl.addEventListener('click', doLogin);
+
+    if (status) {
+        messageEl.style.display = 'none';
+        if (status === 'success') {
+            statusMessageEl.textContent = 'Login successful! You can close this window. You can remove the app from your Pebble settings if you want to unlink it. Your account will be deleted the next time you create a new Todoist task.';
+            setTimeout(() => closeConfig({status: 'success'}), 2000);
+        } else if (status === 'error') {
+            statusMessageEl.textContent = `Error: ${error || 'Unknown error during configuration.'}`;
+        }
+    }
+
+    if (!pebbleTimelineToken || !pebbleAccountToken) {
+        messageEl.style.display = 'none';
+        loginSectionEl.style.display = 'block';
+        statusMessageEl.textContent = 'Missing required tokens. Please open from Pebble app settings.';
+    }
+</script>
+{{end}}
