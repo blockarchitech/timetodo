@@ -65,7 +65,8 @@ func LoadConfig() (*Config, error) {
 		ClientID:     cfg.TodoistClientID,
 		ClientSecret: cfg.TodoistClientSecret,
 		RedirectURL:  cfg.AppBaseURL + "/auth/todoist/callback",
-		Scopes:       []string{"data:read_write", "task:add"},
+		Scopes:       []string{"data:read_write,task:add"},
+
 		Endpoint: oauth2.Endpoint{
 			AuthURL:  "https://todoist.com/oauth/authorize",
 			TokenURL: "https://todoist.com/oauth/access_token",

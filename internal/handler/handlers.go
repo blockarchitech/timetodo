@@ -174,6 +174,13 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 	ctx, span := h.Tracer.Start(r.Context(), "handleTodoistCallback", trace.WithAttributes(attribute.String("http.method", r.Method)))
 	defer span.End()
 
+	// if callback returns with an error, redirect to the Pebble config page with error status
+	if r.URL.Query().Get("error") != "" {
+		h.logger.Warn("Todoist OAuth callback returned an error", zap.String("error", r.URL.Query().Get("error")))
+		http.Redirect(w, r, h.config.AppBaseURL+"/config/pebble?status=error&error="+url.QueryEscape(r.URL.Query().Get("error")), http.StatusTemporaryRedirect)
+		return
+	}
+
 	stateCookie, err := r.Cookie(oauthStateCookieName)
 	if err != nil {
 		h.logger.Warn("OAuth state cookie not found")
