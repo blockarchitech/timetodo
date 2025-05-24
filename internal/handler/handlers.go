@@ -308,6 +308,7 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 	defer r.Body.Close()
 
 	signature := r.Header.Get("X-Todoist-Hmac-SHA256")
+	h.logger.Warn("Received Todoist webhook", zap.String("signature", signature), zap.ByteString("body", body))
 	if !h.verifyTodoistSignature(signature, body) {
 		h.logger.Warn("Invalid Todoist webhook signature")
 		span.SetStatus(codes.Error, "Invalid signature")
@@ -439,6 +440,7 @@ func (h *HttpHandlers) verifyTodoistSignature(signatureHeader string, body []byt
 	body64 := base64.StdEncoding.EncodeToString(body)
 	mac.Write([]byte(body64))
 	expectedMAC := hex.EncodeToString(mac.Sum(nil))
+	h.logger.Warn("Expected MAC", zap.String("expectedMAC", expectedMAC), zap.String("signatureHeader", signatureHeader))
 	return hmac.Equal([]byte(signatureHeader), []byte(expectedMAC))
 }
 
