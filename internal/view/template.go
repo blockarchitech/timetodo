@@ -69,7 +69,7 @@ func (m *HTMLTemplateManager) Render(w http.ResponseWriter, name string, data in
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	err := tmpl.Execute(w, data)
+	err := tmpl.ExecuteTemplate(w, name, data)
 	if err != nil {
 		m.logger.Error("Failed to render template", zap.String("template_name", name), zap.Error(err))
 		return err
