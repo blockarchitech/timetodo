@@ -275,7 +275,7 @@ type TodoistTaskEventData struct {
 	Due         *TodoistDueDate `json:"due,omitempty"`
 	Priority    int             `json:"priority"`
 	ProjectID   string          `json:"project_id,omitempty"`
-	UserID      int64           `json:"user_id"` // This is the user_id from the task data itself
+	UserID      int64           `json:"user_id,string"` // This is the user_id from the task data itself
 }
 
 // PebblePinLayout defines the layout of a Pebble timeline pin.
