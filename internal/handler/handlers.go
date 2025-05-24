@@ -371,7 +371,7 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 			Layout: PebblePinLayout{
 				Type:     "genericPin",
 				Title:    taskData.Content,
-				TinyIcon: "system://images/TODO_EVENT",
+				TinyIcon: "system://images/NOTIFICATION_FLAG",
 			},
 		}
 
