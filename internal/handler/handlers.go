@@ -317,7 +317,7 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 
 	var payload TodoistWebhookPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
-		h.logger.Error("Failed to unmarshal webhook payload", zap.Error(err))
+		h.logger.Error("Failed to unmarshal webhook payload", zap.Error(err), zap.ByteString("body", body))
 		span.SetStatus(codes.Error, "Failed to unmarshal payload")
 		span.RecordError(err)
 		http.Error(w, "Failed to parse request body", http.StatusBadRequest)
