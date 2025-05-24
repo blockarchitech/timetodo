@@ -253,7 +253,7 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 // TodoistWebhookPayload defines the structure for incoming webhook events.
 type TodoistWebhookPayload struct {
 	EventName string          `json:"event_name"`
-	UserID    int64           `json:"user_id"`
+	UserID    int64           `json:"user_id,string"`
 	EventData json.RawMessage `json:"event_data"`
 	Initiator json.RawMessage `json:"initiator,omitempty"`
 }
