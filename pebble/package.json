@@ -1,0 +1,39 @@
+{
+  "name": "timetodo",
+  "author": "blockarchitech",
+  "version": "1.0.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "timetodo",
+    "uuid": "2e72e379-70f6-43a9-828c-07d30d0fdf6d",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "chalk",
+      "diorite"
+    ],
+    "watchapp": {
+      "watchface": false,
+      "hiddenApp": true
+    },
+    "messageKeys": [
+      "dummy"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "bitmap",
+          "name": "CONFIG_REQUIRED",
+          "file": "images/config-required.png"
+        }
+      ]
+    },
+    "capabilities": [
+      "configurable"
+    ]
+  }
+}
