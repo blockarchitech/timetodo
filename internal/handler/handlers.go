@@ -441,7 +441,8 @@ func (h *HttpHandlers) verifyTodoistSignature(signatureHeader string, body []byt
 		h.logger.Error("Failed to decode Todoist signature header", zap.Error(err), zap.String("signatureHeader", signatureHeader))
 		return false
 	}
-	return hmac.Equal([]byte(decodedHeader), []byte(expectedMAC))
+	headerHex := hex.EncodeToString(decodedHeader)
+	return hmac.Equal([]byte(headerHex), []byte(expectedMAC))
 }
 
 // parseTodoistDueDateTime converts a Todoist DueDate object to a time.Time object.
