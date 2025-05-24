@@ -308,7 +308,6 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 	defer r.Body.Close()
 
 	signature := r.Header.Get("X-Todoist-Hmac-SHA256")
-	h.logger.Warn("Received Todoist webhook", zap.String("signature", signature), zap.ByteString("body", body))
 	if !h.verifyTodoistSignature(signature, body) {
 		h.logger.Warn("Invalid Todoist webhook signature")
 		span.SetStatus(codes.Error, "Invalid signature")
@@ -429,19 +428,20 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 
 // verifyTodoistSignature verifies the HMAC SHA256 signature of the Todoist webhook.
 func (h *HttpHandlers) verifyTodoistSignature(signatureHeader string, body []byte) bool {
-	// TL;DR: Todoist uses HMAC SHA256 for webhook signatures. It is encrypted using the Client Secret.
-	// If we can:
-	// 1. Decrypt the signature using the Client Secret
-	// 2. Recreate the HMAC SHA256 hash of the body
-	// 3. Decode the hmac from base64
-	// 4. Compare the two hashes
-	// then we can verify the signature.
 	mac := hmac.New(sha256.New, []byte(h.config.TodoistClientSecret))
-	body64 := base64.StdEncoding.EncodeToString(body)
-	mac.Write([]byte(body64))
+	mac.Write(body)
 	expectedMAC := hex.EncodeToString(mac.Sum(nil))
-	h.logger.Warn("Expected MAC", zap.String("expectedMAC", expectedMAC), zap.String("signatureHeader", signatureHeader))
-	return hmac.Equal([]byte(signatureHeader), []byte(expectedMAC))
+	// base64-decode the signature header
+	if signatureHeader == "" {
+		h.logger.Warn("Empty signature header received from Todoist webhook")
+		return false
+	}
+	decodedHeader, err := base64.StdEncoding.DecodeString(signatureHeader)
+	if err != nil {
+		h.logger.Error("Failed to decode Todoist signature header", zap.Error(err), zap.String("signatureHeader", signatureHeader))
+		return false
+	}
+	return hmac.Equal([]byte(decodedHeader), []byte(expectedMAC))
 }
 
 // parseTodoistDueDateTime converts a Todoist DueDate object to a time.Time object.
