@@ -23,14 +23,10 @@
 <div class="container">
     <h1>timetodo</h1>
 
-    <p id="message">Please wait.</p>
+    <p>Tap the button below to log in.</p>
+    <button id="login-button" class="button">Login with Todoist</button>
 
-    <div id="login-section" style="display: none;">
-        <p>Tap the button below to log in.</p>
-        <button id="login-button" class="button">Login with Todoist</button>
-    </div>
-
-    <div id="status-message" class="message"></div>
+    <div id="status-message"></div>
 
 </div>
 <script>
@@ -40,8 +36,6 @@
     const status = queryParams.get('status');
     const error = queryParams.get('error');
 
-    const messageEl = document.getElementById('message');
-    const loginSectionEl = document.getElementById('login-section');
     const loginButtonEl = document.getElementById('login-button');
     const statusMessageEl = document.getElementById('status-message');
 
@@ -56,14 +50,12 @@
             window.location.href = loginUrl;
         } else {
             statusMessageEl.textContent = 'Missing required tokens. Please open from Pebble app settings.';
-            messageEl.style.display = 'none';
         }
     }
 
     loginButtonEl.addEventListener('click', doLogin);
 
     if (status) {
-        messageEl.style.display = 'none';
         if (status === 'success') {
             statusMessageEl.textContent = 'Login successful! You can close this window. You can remove the app from your Pebble settings if you want to unlink it. Your account will be deleted the next time you create a new Todoist task.';
             setTimeout(() => closeConfig({status: 'success'}), 2000);
@@ -73,8 +65,6 @@
     }
 
     if (!pebbleTimelineToken || !pebbleAccountToken) {
-        messageEl.style.display = 'none';
-        loginSectionEl.style.display = 'block';
         statusMessageEl.textContent = 'Missing required tokens. Please open from Pebble app settings.';
         loginButtonEl.style.display = 'none';
     }
