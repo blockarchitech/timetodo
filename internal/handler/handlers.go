@@ -457,7 +457,13 @@ func parseTodoistDueDateTime(due *TodoistDueDate) (time.Time, error) {
 	}
 	for _, layout := range layouts {
 		if t, err := time.Parse(layout, due.Date); err == nil {
-			return t.UTC(), nil
+			// if we are using the made-up RFC3339 format, we need to set the time to UTC
+			if layout == "2006-01-02T15:04:05" {
+				currentTime := time.Now().UTC()
+				offset := currentTime.Sub(currentTime.UTC())
+				t = t.Add(offset)
+			}
+			return t, nil
 		}
 	}
 	if t, err := time.Parse("2006-01-02", due.Date); err == nil {
