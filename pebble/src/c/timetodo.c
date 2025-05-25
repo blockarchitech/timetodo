@@ -67,7 +67,22 @@ void dialog_config_window_push()
   window_stack_push(s_main_window, true);
 }
 
+static void appmessage_inbox_received(DictionaryIterator *iter, void *context)
+{
+    Tuple *close_tuple = dict_find(iter, MESSAGE_KEY_Close);
+    if (close_tuple) {
+        APP_LOG(APP_LOG_LEVEL_DEBUG, "Received close message, closing app");
+        window_stack_pop_all(true);
+        return;
+    }
+}
 
+static void appmessage_init(void)
+{
+  app_message_register_inbox_received(appmessage_inbox_received);
+  app_message_open(64, 64);
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "AppMessage initialized");
+}
 
 static void prv_deinit(void) 
 {
@@ -85,6 +100,7 @@ static void prv_init(void)
 int main(void)
 {
   prv_init();
+  appmessage_init();
 
   APP_LOG(APP_LOG_LEVEL_DEBUG, "Done initializing");
 

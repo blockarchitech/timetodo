@@ -58,7 +58,6 @@
     if (status) {
         if (status === 'success') {
             statusMessageEl.textContent = 'Login successful! You can close this window. You can remove the app from your Pebble settings if you want to unlink it. Your account will be deleted the next time you create a new Todoist task.';
-            setTimeout(() => closeConfig({status: 'success'}), 2000);
         } else if (status === 'error') {
             statusMessageEl.textContent = `Error: ${error || 'Unknown error during configuration.'}`;
         }

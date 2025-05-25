@@ -106,7 +106,7 @@ func (h *HttpHandlers) HandlePebbleConfig(w http.ResponseWriter, r *http.Request
 
 	if pebbleTimelineToken == "" || pebbleAccountToken == "" {
 		h.logger.Warn("Missing required Pebble tokens in config request")
-		data["Error"] = "Missing required Pebble tokens. Please open from Pebble app settings."
+		data["error"] = "Missing required Pebble tokens. Please open from Pebble app settings."
 		h.renderConfigPage(w, data, http.StatusBadRequest)
 		return
 	}
@@ -114,22 +114,15 @@ func (h *HttpHandlers) HandlePebbleConfig(w http.ResponseWriter, r *http.Request
 	user, found, err := h.tokenStore.GetTokensByPebbleAccount(ctx, pebbleAccountToken)
 	if err != nil {
 		h.logger.Error("Error getting tokens by Pebble account", zap.Error(err))
-		data["Status"] = "error"
-		data["Error"] = "Could not retrieve stored configuration."
+		data["status"] = "error"
+		data["error"] = "Could not retrieve stored configuration."
 		h.renderConfigPage(w, data, http.StatusInternalServerError)
 		return
 	}
 
 	if found && user.TodoistAccessToken != nil && user.TodoistAccessToken.Valid() {
 		h.logger.Info("User already authenticated", zap.String("pebbleAccountToken", pebbleAccountToken))
-		data["Status"] = "success"
-	} else {
-		data["TodoistLoginURL"] = fmt.Sprintf(
-			"%s/auth/todoist/login?pebble_account_token=%s&pebble_timeline_token=%s",
-			h.config.AppBaseURL,
-			url.QueryEscape(pebbleAccountToken),
-			url.QueryEscape(pebbleTimelineToken),
-		)
+		data["status"] = "success"
 	}
 
 	h.renderConfigPage(w, data, http.StatusOK)

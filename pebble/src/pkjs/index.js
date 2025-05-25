@@ -12,3 +12,10 @@ Pebble.addEventListener("showConfiguration", function() {
         Pebble.openURL('https://timetodo-282379823777.us-central1.run.app/config/pebble');
     })
 });
+
+Pebble.addEventListener("webviewclosed", function(e) {
+    // close app
+    Pebble.sendAppMessage({'Close': 1}, function() {
+        console.log('App closed successfully');
+    });
+})
