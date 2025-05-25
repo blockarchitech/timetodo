@@ -260,7 +260,7 @@ type TodoistWebhookPayload struct {
 
 // TodoistDueDate represents the due date object from Todoist API
 type TodoistDueDate struct {
-	Date        string `json:"date,omitempty"`
+	Date        string `json:"date"`
 	String      string `json:"string"`
 	Lang        string `json:"lang,omitempty"`
 	Timezone    string `json:"timezone,omitempty"`
@@ -363,6 +363,8 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+
+		h.logger.Info("Processing task for Pebble pin", zap.String("taskID", taskData.ID), zap.String("taskContent", taskData.Content), zap.String("dueDate", taskData.Due.Date))
 
 		dueTime, err := parseTodoistDueDateTime(taskData.Due)
 		if err != nil {
@@ -474,5 +476,5 @@ func parseTodoistDueDateTime(due *TodoistDueDate) (time.Time, error) {
 		}
 	}
 
-	return time.Time{}, fmt.Errorf("failed to parse due date/datetime: %s", due.String)
+	return time.Time{}, fmt.Errorf("failed to parse due date/datetime: %s", due.Date)
 }
