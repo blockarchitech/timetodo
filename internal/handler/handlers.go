@@ -393,7 +393,7 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 		if userTokens.PebbleTimelineToken == "" {
 			h.logger.Warn("User has no Pebble Timeline Token, cannot push pin", zap.Int64("todoistUserID", payload.UserID))
 			span.SetAttributes(attribute.String("app.pin_skipped_reason", "no_pebble_timeline_token"))
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusOK) // Acknowledge webhook
 			return
 		}
 
@@ -438,7 +438,7 @@ func (h *HttpHandlers) verifyTodoistSignature(signatureHeader string, body []byt
 	}
 	decodedHeader, err := base64.StdEncoding.DecodeString(signatureHeader)
 	if err != nil {
-		h.logger.Error("Failed to decode Todoist signature header", zap.Error(err), zap.String("signatureHeader", signatureHeader))
+		h.logger.Error("Failed to decode Todoist signature header", zap.Error(err))
 		return false
 	}
 	headerHex := hex.EncodeToString(decodedHeader)
