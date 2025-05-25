@@ -102,7 +102,7 @@ func (h *HttpHandlers) HandlePebbleConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	userTokens, found, err := h.tokenStore.GetTokensByPebbleAccount(ctx, pebbleAccountToken)
+	user, found, err := h.tokenStore.GetTokensByPebbleAccount(ctx, pebbleAccountToken)
 	if err != nil {
 		h.logger.Error("Error getting tokens", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Error(err))
 		data := map[string]string{"Status": "error", "Error": "Could not retrieve stored configuration."}
@@ -113,7 +113,7 @@ func (h *HttpHandlers) HandlePebbleConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if found && userTokens.TodoistAccessToken != nil && userTokens.TodoistAccessToken.Valid() {
+	if found && user.TodoistAccessToken != nil && user.TodoistAccessToken.Valid() {
 		h.logger.Info("User already authenticated with Todoist", zap.String("pebbleAccountToken", pebbleAccountToken))
 		data := map[string]string{"Status": "success"}
 		if errRender := h.htmlManager.Render(w, "config.html", data); errRender != nil {
@@ -204,7 +204,7 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 
 	span.SetAttributes(attribute.Bool("todoist.token_exchanged", true))
 
-	todoistUserID, err := h.todoistService.GetUserID(ctx, todoistToken.AccessToken)
+	todoistUser, err := h.todoistService.GetUser(ctx, todoistToken.AccessToken)
 	if err != nil {
 		h.logger.Error("Failed to get Todoist user ID", zap.Error(err))
 		// Not redirecting on this error, but logging it.
@@ -222,15 +222,17 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 	pebbleAccountToken := pebbleAccountTokenCookie.Value
 	pebbleTimelineToken := pebbleTimelineTokenCookie.Value
 
-	userTokens := storage.UserTokens{
+	user := storage.User{
 		PebbleAccountToken:  pebbleAccountToken,
 		PebbleTimelineToken: pebbleTimelineToken,
 		TodoistAccessToken:  todoistToken,
-		TodoistUserID:       todoistUserID, // Store the fetched User ID
+		TodoistUserID:       todoistUser.User.ID,
+		Timezone:            todoistUser.User.TimezoneInfo.Timezone,
+		TimezoneHourOffset:  todoistUser.User.TimezoneInfo.Hours,
 		LastUpdated:         time.Now(),
 	}
 
-	if err := h.tokenStore.StoreTokens(ctx, pebbleAccountToken, userTokens); err != nil {
+	if err := h.tokenStore.StoreTokens(ctx, pebbleAccountToken, user); err != nil {
 		h.logger.Error("Failed to store tokens", zap.Error(err))
 		http.Redirect(w, r, h.config.AppBaseURL+"/config/pebble?status=error&error="+url.QueryEscape("Failed to save configuration"), http.StatusTemporaryRedirect)
 		return
@@ -241,8 +243,8 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 	http.SetCookie(w, &http.Cookie{Name: oauthPebbleAccountTokenCookieName, Path: "/", MaxAge: -1})
 	http.SetCookie(w, &http.Cookie{Name: oauthPebbleTimelineTokenCookieName, Path: "/", MaxAge: -1})
 
-	h.logger.Info("Successfully authenticated and stored tokens", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Int64("todoistUserID", todoistUserID))
-	span.SetAttributes(attribute.String("pebble.account_token", pebbleAccountToken), attribute.Int64("todoist.user_id", todoistUserID))
+	h.logger.Info("Successfully authenticated and stored tokens", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Int64("todoistUserID", todoistUser.User.ID))
+	span.SetAttributes(attribute.String("pebble.account_token", pebbleAccountToken), attribute.Int64("todoist.user_id", todoistUser.User.ID))
 
 	// Redirect to Pebble close with success
 	http.Redirect(w, r, "pebblejs://close#{\"status\":\"success\"}", http.StatusTemporaryRedirect)
@@ -331,7 +333,7 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 	h.logger.Info("Received Todoist webhook", zap.String("eventName", payload.EventName), zap.Int64("userID", payload.UserID))
 
 	// Fetch user tokens using Todoist User ID
-	userTokens, found, err := h.tokenStore.GetTokensByTodoistUserID(ctx, payload.UserID)
+	user, found, err := h.tokenStore.GetTokensByTodoistUserID(ctx, payload.UserID)
 	if err != nil {
 		h.logger.Error("Failed to get tokens by Todoist User ID for webhook", zap.Int64("todoistUserID", payload.UserID), zap.Error(err))
 		span.RecordError(err)
@@ -364,7 +366,7 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 			return
 		}
 
-		dueTime, err := parseTodoistDueDateTime(taskData.Due)
+		dueTime, err := parseTodoistDueDateTime(taskData.Due, user.TimezoneHourOffset)
 		if err != nil {
 			h.logger.Error("Failed to parse due date from webhook task", zap.Error(err), zap.Any("dueObject", taskData.Due))
 			span.RecordError(err)
@@ -390,14 +392,14 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 			return
 		}
 
-		if userTokens.PebbleTimelineToken == "" {
+		if user.PebbleTimelineToken == "" {
 			h.logger.Warn("User has no Pebble Timeline Token, cannot push pin", zap.Int64("todoistUserID", payload.UserID))
 			span.SetAttributes(attribute.String("app.pin_skipped_reason", "no_pebble_timeline_token"))
 			w.WriteHeader(http.StatusOK) // Acknowledge webhook
 			return
 		}
 
-		if err, status_code := h.pebbleTimelineService.PushPin(ctx, userTokens.PebbleTimelineToken, pinJSON); err != nil {
+		if err, status_code := h.pebbleTimelineService.PushPin(ctx, user.PebbleTimelineToken, pinJSON); err != nil {
 			h.logger.Error("Failed to push Pebble pin from webhook task", zap.Error(err), zap.String("pinID", pin.ID))
 			span.RecordError(err)
 			// Still return 200 OK to Todoist
@@ -446,7 +448,7 @@ func (h *HttpHandlers) verifyTodoistSignature(signatureHeader string, body []byt
 }
 
 // parseTodoistDueDateTime converts a Todoist DueDate object to a time.Time object.
-func parseTodoistDueDateTime(due *TodoistDueDate) (time.Time, error) {
+func parseTodoistDueDateTime(due *TodoistDueDate, offset int) (time.Time, error) {
 	if due == nil {
 		return time.Time{}, fmt.Errorf("due object is nil")
 	}
@@ -457,11 +459,9 @@ func parseTodoistDueDateTime(due *TodoistDueDate) (time.Time, error) {
 	}
 	for _, layout := range layouts {
 		if t, err := time.Parse(layout, due.Date); err == nil {
-			// if we are using the made-up RFC3339 format, we need to set the time to UTC
+			// if we are using the made-up RFC3339 format, use the provided offset to adjust the time
 			if layout == "2006-01-02T15:04:05" {
-				currentTime := time.Now().UTC()
-				offset := currentTime.Sub(currentTime.UTC())
-				t = t.Add(offset)
+				t = t.Add(time.Duration(offset) * time.Hour)
 			}
 			return t, nil
 		}

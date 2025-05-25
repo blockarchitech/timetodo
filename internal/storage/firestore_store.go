@@ -30,7 +30,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const defaultTokenCollectionName = "userTokens"
+const defaultTokenCollectionName = "users"
 
 type FirestoreTokenStore struct {
 	client         *firestore.Client
@@ -52,7 +52,7 @@ func NewFirestoreTokenStore(ctx context.Context, projectID string, logger *zap.L
 	}, nil
 }
 
-func (s *FirestoreTokenStore) StoreTokens(ctx context.Context, pebbleAccountToken string, tokens UserTokens) error {
+func (s *FirestoreTokenStore) StoreTokens(ctx context.Context, pebbleAccountToken string, tokens User) error {
 	tokens.LastUpdated = time.Now()
 	_, err := s.client.Collection(s.collectionName).Doc(pebbleAccountToken).Set(ctx, tokens)
 	if err != nil {
@@ -63,27 +63,27 @@ func (s *FirestoreTokenStore) StoreTokens(ctx context.Context, pebbleAccountToke
 	return nil
 }
 
-func (s *FirestoreTokenStore) GetTokensByPebbleAccount(ctx context.Context, pebbleAccountToken string) (UserTokens, bool, error) {
+func (s *FirestoreTokenStore) GetTokensByPebbleAccount(ctx context.Context, pebbleAccountToken string) (User, bool, error) {
 	dsnap, err := s.client.Collection(s.collectionName).Doc(pebbleAccountToken).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			s.logger.Info("Tokens not found for pebbleAccountToken", zap.String("pebbleAccountToken", pebbleAccountToken))
-			return UserTokens{}, false, nil
+			return User{}, false, nil
 		}
 		s.logger.Error("Failed to get tokens from Firestore", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Error(err))
-		return UserTokens{}, false, fmt.Errorf("failed to get document: %w", err)
+		return User{}, false, fmt.Errorf("failed to get document: %w", err)
 	}
 
-	var tokens UserTokens
+	var tokens User
 	if err := dsnap.DataTo(&tokens); err != nil {
 		s.logger.Error("Failed to decode token data from Firestore", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Error(err))
-		return UserTokens{}, false, fmt.Errorf("failed to decode token data: %w", err)
+		return User{}, false, fmt.Errorf("failed to decode token data: %w", err)
 	}
 	s.logger.Debug("Successfully retrieved tokens", zap.String("pebbleAccountToken", pebbleAccountToken))
 	return tokens, true, nil
 }
 
-func (s *FirestoreTokenStore) GetTokensByTodoistUserID(ctx context.Context, todoistUserID int64) (UserTokens, bool, error) {
+func (s *FirestoreTokenStore) GetTokensByTodoistUserID(ctx context.Context, todoistUserID int64) (User, bool, error) {
 	iter := s.client.Collection(s.collectionName).Where("todoistUserID", "==", todoistUserID).Limit(1).Documents(ctx)
 	defer iter.Stop()
 
@@ -91,16 +91,16 @@ func (s *FirestoreTokenStore) GetTokensByTodoistUserID(ctx context.Context, todo
 	if err != nil {
 		if errors.Is(err, iterator.Done) {
 			s.logger.Info("Tokens not found for todoistUserID", zap.Int64("todoistUserID", todoistUserID))
-			return UserTokens{}, false, nil
+			return User{}, false, nil
 		}
 		s.logger.Error("Failed to query tokens by TodoistUserID from Firestore", zap.Int64("todoistUserID", todoistUserID), zap.Error(err))
-		return UserTokens{}, false, fmt.Errorf("failed to query tokens by TodoistUserID: %w", err)
+		return User{}, false, fmt.Errorf("failed to query tokens by TodoistUserID: %w", err)
 	}
 
-	var tokens UserTokens
+	var tokens User
 	if err := dsnap.DataTo(&tokens); err != nil {
 		s.logger.Error("Failed to decode token data from Firestore (by TodoistUserID)", zap.Int64("todoistUserID", todoistUserID), zap.Error(err))
-		return UserTokens{}, false, fmt.Errorf("failed to decode token data: %w", err)
+		return User{}, false, fmt.Errorf("failed to decode token data: %w", err)
 	}
 	s.logger.Debug("Successfully retrieved tokens by TodoistUserID", zap.Int64("todoistUserID", todoistUserID))
 	return tokens, true, nil

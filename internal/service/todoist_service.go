@@ -59,17 +59,21 @@ func NewTodoistService(tracer trace.Tracer, logger *zap.Logger) *TodoistService 
 }
 
 // todoistUserResponse is a minimal struct to unmarshal the user object from Todoist Sync API.
-type todoistUserResponse struct {
+type TodoistUserResponse struct {
 	User struct {
-		ID       json.Number `json:"id"` // Use json.Number to handle potential string or number
-		Email    string      `json:"email"`
-		FullName string      `json:"full_name"`
+		ID           int64  `json:"id,string"` // Use json.Number to handle potential string or number
+		Email        string `json:"email"`
+		FullName     string `json:"full_name"`
+		TimezoneInfo struct {
+			Timezone string `json:"timezone"`
+			Hours    int    `json:"hours"`
+		} `json:"tz_info"`
 	} `json:"user"`
 	SyncToken string `json:"sync_token"`
 }
 
 // GetUserID fetches the Todoist User ID for the given access token.
-func (s *TodoistService) GetUserID(ctx context.Context, accessToken string) (int64, error) {
+func (s *TodoistService) GetUser(ctx context.Context, accessToken string) (TodoistUserResponse, error) {
 	s.logger.Debug("Fetching Todoist User ID")
 
 	formData := url.Values{}
@@ -82,7 +86,7 @@ func (s *TodoistService) GetUserID(ctx context.Context, accessToken string) (int
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, todoistAPIBaseURL+"/sync", strings.NewReader(formData.Encode()))
 	if err != nil {
 		s.logger.Error("Failed to create request to fetch Todoist user ID", zap.Error(err))
-		return 0, fmt.Errorf("failed to create request for Todoist user ID: %w", err)
+		return TodoistUserResponse{}, fmt.Errorf("failed to create request for Todoist user ID: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+accessToken)
@@ -91,14 +95,14 @@ func (s *TodoistService) GetUserID(ctx context.Context, accessToken string) (int
 	resp, err := s.client.Do(req)
 	if err != nil {
 		s.logger.Error("Request to fetch Todoist user ID failed", zap.Error(err))
-		return 0, fmt.Errorf("request to Todoist API failed: %w", err)
+		return TodoistUserResponse{}, fmt.Errorf("request to Todoist API failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		s.logger.Error("Failed to read response body from Todoist user ID request", zap.Error(err))
-		return 0, fmt.Errorf("failed to read response body: %w", err)
+		return TodoistUserResponse{}, fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -106,26 +110,14 @@ func (s *TodoistService) GetUserID(ctx context.Context, accessToken string) (int
 			zap.Int("statusCode", resp.StatusCode),
 			zap.ByteString("responseBody", bodyBytes),
 		)
-		return 0, fmt.Errorf("Todoist API returned status %d: %s", resp.StatusCode, string(bodyBytes))
+		return TodoistUserResponse{}, fmt.Errorf("Todoist API returned status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var userResp todoistUserResponse
+	var userResp TodoistUserResponse
 	if err := json.Unmarshal(bodyBytes, &userResp); err != nil {
 		s.logger.Error("Failed to unmarshal Todoist user response", zap.Error(err), zap.ByteString("responseBody", bodyBytes))
-		return 0, fmt.Errorf("failed to unmarshal user response: %w", err)
+		return TodoistUserResponse{}, fmt.Errorf("failed to unmarshal user response: %w", err)
 	}
 
-	if userResp.User.ID == "" {
-		s.logger.Error("Todoist user ID not found in response", zap.ByteString("responseBody", bodyBytes))
-		return 0, fmt.Errorf("user ID not found in Todoist response")
-	}
-
-	userID, err := userResp.User.ID.Int64()
-	if err != nil {
-		s.logger.Error("Failed to convert Todoist user ID to int64", zap.String("userIDString", string(userResp.User.ID)), zap.Error(err))
-		return 0, fmt.Errorf("failed to convert user ID to int64: %w", err)
-	}
-
-	s.logger.Info("Successfully fetched Todoist User ID", zap.Int64("userID", userID), zap.String("email", userResp.User.Email))
-	return userID, nil
+	return userResp, nil
 }

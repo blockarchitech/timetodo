@@ -26,20 +26,20 @@ import (
 
 type InMemoryTokenStore struct {
 	mu                sync.RWMutex
-	tokensByPebbleAcc map[string]UserTokens
-	tokensByTodoistID map[int64]UserTokens
+	tokensByPebbleAcc map[string]User
+	tokensByTodoistID map[int64]User
 	logger            *zap.Logger
 }
 
 func NewInMemoryTokenStore(logger *zap.Logger) *InMemoryTokenStore {
 	return &InMemoryTokenStore{
-		tokensByPebbleAcc: make(map[string]UserTokens),
-		tokensByTodoistID: make(map[int64]UserTokens),
+		tokensByPebbleAcc: make(map[string]User),
+		tokensByTodoistID: make(map[int64]User),
 		logger:            logger.Named("inmemory_store"),
 	}
 }
 
-func (s *InMemoryTokenStore) StoreTokens(ctx context.Context, pebbleAccountToken string, tokens UserTokens) error {
+func (s *InMemoryTokenStore) StoreTokens(ctx context.Context, pebbleAccountToken string, tokens User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tokens.LastUpdated = time.Now()
@@ -51,7 +51,7 @@ func (s *InMemoryTokenStore) StoreTokens(ctx context.Context, pebbleAccountToken
 	return nil
 }
 
-func (s *InMemoryTokenStore) GetTokensByPebbleAccount(ctx context.Context, pebbleAccountToken string) (UserTokens, bool, error) {
+func (s *InMemoryTokenStore) GetTokensByPebbleAccount(ctx context.Context, pebbleAccountToken string) (User, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	tokens, found := s.tokensByPebbleAcc[pebbleAccountToken]
@@ -62,7 +62,7 @@ func (s *InMemoryTokenStore) GetTokensByPebbleAccount(ctx context.Context, pebbl
 	return tokens, found, nil
 }
 
-func (s *InMemoryTokenStore) GetTokensByTodoistUserID(ctx context.Context, todoistUserID int64) (UserTokens, bool, error) {
+func (s *InMemoryTokenStore) GetTokensByTodoistUserID(ctx context.Context, todoistUserID int64) (User, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	tokens, found := s.tokensByTodoistID[todoistUserID]

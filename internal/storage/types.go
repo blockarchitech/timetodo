@@ -22,20 +22,22 @@ import (
 	"time"
 )
 
-// UserTokens holds the various tokens for a user.
-type UserTokens struct {
+// User holds user information and OAuth tokens.
+type User struct {
 	PebbleAccountToken  string        `firestore:"pebbleAccountToken,omitempty"`
 	PebbleTimelineToken string        `firestore:"pebbleTimelineToken,omitempty"`
 	TodoistAccessToken  *oauth2.Token `firestore:"todoistAccessToken,omitempty"`
 	TodoistUserID       int64         `firestore:"todoistUserID,omitempty"`
 	LastUpdated         time.Time     `firestore:"lastUpdated,omitempty"`
+	Timezone            string        `firestore:"timezone,omitempty"`           // e.g. "America/New_York"
+	TimezoneHourOffset  int           `firestore:"timezoneHourOffset,omitempty"` // e.g. -5 for EST
 }
 
 // TokenStore defines the interface for storing and retrieving user tokens.
 type TokenStore interface {
-	StoreTokens(ctx context.Context, pebbleAccountToken string, tokens UserTokens) error
-	GetTokensByPebbleAccount(ctx context.Context, pebbleAccountToken string) (UserTokens, bool, error)
-	GetTokensByTodoistUserID(ctx context.Context, todoistUserID int64) (UserTokens, bool, error)
+	StoreTokens(ctx context.Context, pebbleAccountToken string, tokens User) error
+	GetTokensByPebbleAccount(ctx context.Context, pebbleAccountToken string) (User, bool, error)
+	GetTokensByTodoistUserID(ctx context.Context, todoistUserID int64) (User, bool, error)
 	Close() error
 	DeleteTokensByTodoistUserID(ctx context.Context, id int64) error
 }
