@@ -457,7 +457,7 @@ func parseTodoistDueDateTime(due *TodoistDueDate) (time.Time, error) {
 	}
 	for _, layout := range layouts {
 		if t, err := time.Parse(layout, due.Date); err == nil {
-			return t, nil
+			return t.UTC(), nil
 		}
 	}
 	if t, err := time.Parse("2006-01-02", due.Date); err == nil {
