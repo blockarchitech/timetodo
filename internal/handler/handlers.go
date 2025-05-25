@@ -461,7 +461,7 @@ func parseTodoistDueDateTime(due *TodoistDueDate, offset int) (time.Time, error)
 		if t, err := time.Parse(layout, due.Date); err == nil {
 			// if we are using the made-up RFC3339 format, use the provided offset to adjust the time
 			if layout == "2006-01-02T15:04:05" {
-				t = t.Add(time.Duration(offset) * time.Hour)
+				t = t.Add(-time.Duration(offset) * time.Hour)
 			}
 			return t, nil
 		}
