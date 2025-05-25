@@ -1,54 +1,54 @@
 /*
- *    Copyright 2025 blockarchitech
+ * Copyright 2025 blockarchitech
  *
- *    Licensed under the Apache License, Version 2.0 (the "License");
- *    you may not use this file except in compliance with the License.
- *    You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *        http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
- *    Unless required by applicable law or agreed to in writing, software
- *    distributed under the License is distributed on an "AS IS" BASIS,
- *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *    See the License for the specific language governing permissions and
- *    limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package handler
 
 import (
-	"blockarchitech.com/timetodo/internal/utils"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"time"
-
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
-
-	"go.uber.org/zap"
-	"golang.org/x/oauth2"
-
 	"blockarchitech.com/timetodo/internal/config"
 	"blockarchitech.com/timetodo/internal/service"
 	"blockarchitech.com/timetodo/internal/storage"
 	"blockarchitech.com/timetodo/internal/types/pebble"
 	"blockarchitech.com/timetodo/internal/types/todoist"
+	"blockarchitech.com/timetodo/internal/utils"
 	"blockarchitech.com/timetodo/internal/view"
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+	"golang.org/x/oauth2"
+	"io"
+	"net/http"
+	"net/url"
+	"time"
 )
 
 const (
 	oauthStateCookieName               = "timetodo_oauth_state"
 	oauthPebbleAccountTokenCookieName  = "timetodo_oauth_p_acc_token"
 	oauthPebbleTimelineTokenCookieName = "timetodo_oauth_p_timeline_token"
+	oauthCookieMaxAge                  = 300 // 5 minutes
+	pebbleCloseSuccessURL              = "pebblejs://close#{\"status\":\"success\"}"
 )
 
-// HttpHandlers holds application-wide state and dependencies, managed by FX.
+// HttpHandlers holds application-wide state and dependencies.
 type HttpHandlers struct {
 	logger                *zap.Logger
 	tokenStore            storage.TokenStore
@@ -62,9 +62,18 @@ type HttpHandlers struct {
 }
 
 // NewHttpHandlers creates a new HttpHandlers instance.
-func NewHttpHandlers(logger *zap.Logger, oauth2Config *oauth2.Config, tokenStore storage.TokenStore, htmlManager *view.HTMLTemplateManager, cfg *config.Config, todoistService *service.TodoistService, pebbleService *service.PebbleTimelineService, tracer trace.Tracer) *HttpHandlers {
+func NewHttpHandlers(
+	logger *zap.Logger,
+	oauth2Config *oauth2.Config,
+	tokenStore storage.TokenStore,
+	htmlManager *view.HTMLTemplateManager,
+	cfg *config.Config,
+	todoistService *service.TodoistService,
+	pebbleService *service.PebbleTimelineService,
+	tracer trace.Tracer,
+) *HttpHandlers {
 	return &HttpHandlers{
-		logger:                logger,
+		logger:                logger.Named("http_handler"),
 		tokenStore:            tokenStore,
 		oauth2Config:          oauth2Config,
 		config:                cfg,
@@ -79,8 +88,10 @@ func NewHttpHandlers(logger *zap.Logger, oauth2Config *oauth2.Config, tokenStore
 // --- HTTP Handlers ---
 
 // HandlePebbleConfig serves the Pebble configuration page.
+// It checks for Pebble tokens and existing authentication,
+// otherwise, it provides a login URL.
 func (h *HttpHandlers) HandlePebbleConfig(w http.ResponseWriter, r *http.Request) {
-	ctx, span := h.Tracer.Start(r.Context(), "handlePebbleConfig", trace.WithAttributes(attribute.String("http.method", r.Method)))
+	ctx, span := h.Tracer.Start(r.Context(), "HandlePebbleConfig")
 	defer span.End()
 
 	pebbleTimelineToken := r.URL.Query().Get("timeline_token")
@@ -89,141 +100,119 @@ func (h *HttpHandlers) HandlePebbleConfig(w http.ResponseWriter, r *http.Request
 	span.SetAttributes(
 		attribute.Bool("pebble.timeline_token_present", pebbleTimelineToken != ""),
 		attribute.Bool("pebble.account_token_present", pebbleAccountToken != ""),
-		attribute.String("pebble.UserAgent", r.UserAgent()), // TODO: don't log user agent
 	)
 
+	data := make(map[string]string)
+
 	if pebbleTimelineToken == "" || pebbleAccountToken == "" {
-		h.logger.Warn("Missing pebble_timeline_token or pebble_account_token")
-		data := map[string]string{
-			"Error": "Missing required Pebble tokens. Please open from Pebble app settings.",
-		}
-		if err := h.htmlManager.Render(w, "config.html", data); err != nil {
-			h.logger.Error("Failed to render config page for missing tokens", zap.Error(err))
-			http.Error(w, "Failed to render page", http.StatusInternalServerError)
-		}
+		h.logger.Warn("Missing required Pebble tokens in config request")
+		data["Error"] = "Missing required Pebble tokens. Please open from Pebble app settings."
+		h.renderConfigPage(w, data, http.StatusBadRequest)
 		return
 	}
 
 	user, found, err := h.tokenStore.GetTokensByPebbleAccount(ctx, pebbleAccountToken)
 	if err != nil {
-		h.logger.Error("Error getting tokens", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Error(err))
-		data := map[string]string{"Status": "error", "Error": "Could not retrieve stored configuration."}
-		if errRender := h.htmlManager.Render(w, "config.html", data); errRender != nil {
-			h.logger.Error("Failed to render config page for token error", zap.Error(errRender))
-			http.Error(w, "Failed to render page", http.StatusInternalServerError)
-		}
+		h.logger.Error("Error getting tokens by Pebble account", zap.Error(err))
+		data["Status"] = "error"
+		data["Error"] = "Could not retrieve stored configuration."
+		h.renderConfigPage(w, data, http.StatusInternalServerError)
 		return
 	}
 
 	if found && user.TodoistAccessToken != nil && user.TodoistAccessToken.Valid() {
-		h.logger.Info("User already authenticated with Todoist", zap.String("pebbleAccountToken", pebbleAccountToken))
-		data := map[string]string{"Status": "success"}
-		if errRender := h.htmlManager.Render(w, "config.html", data); errRender != nil {
-			h.logger.Error("Failed to render config page for success status", zap.Error(errRender))
-			http.Error(w, "Failed to render page", http.StatusInternalServerError)
-		}
-		return
+		h.logger.Info("User already authenticated", zap.String("pebbleAccountToken", pebbleAccountToken))
+		data["Status"] = "success"
+	} else {
+		data["TodoistLoginURL"] = fmt.Sprintf(
+			"%s/auth/todoist/login?pebble_account_token=%s&pebble_timeline_token=%s",
+			h.config.AppBaseURL,
+			url.QueryEscape(pebbleAccountToken),
+			url.QueryEscape(pebbleTimelineToken),
+		)
 	}
 
-	loginURL := fmt.Sprintf("%s/auth/todoist/login?pebble_account_token=%s&pebble_timeline_token=%s",
-		h.config.AppBaseURL,
-		url.QueryEscape(pebbleAccountToken),
-		url.QueryEscape(pebbleTimelineToken),
-	)
-
-	data := map[string]string{
-		"TodoistLoginURL": loginURL,
-	}
-	if err := h.htmlManager.Render(w, "config.html", data); err != nil {
-		h.logger.Error("Error rendering config page for OAuth", zap.Error(err))
-		http.Error(w, "Failed to render page", http.StatusInternalServerError)
-	}
+	h.renderConfigPage(w, data, http.StatusOK)
 }
 
 // HandleTodoistLogin initiates the OAuth2 flow with Todoist.
+// It generates a state, sets cookies, and redirects to Todoist.
 func (h *HttpHandlers) HandleTodoistLogin(w http.ResponseWriter, r *http.Request) {
-	_, span := h.Tracer.Start(r.Context(), "handleTodoistLogin", trace.WithAttributes(attribute.String("http.method", r.Method)))
+	_, span := h.Tracer.Start(r.Context(), "HandleTodoistLogin")
 	defer span.End()
 
 	pebbleAccountToken := r.URL.Query().Get("pebble_account_token")
 	pebbleTimelineToken := r.URL.Query().Get("pebble_timeline_token")
 
 	if pebbleAccountToken == "" || pebbleTimelineToken == "" {
-		h.logger.Warn("Missing Pebble account or timeline token in request to /auth/todoist/login")
-		http.Error(w, "Missing Pebble account or timeline token", http.StatusBadRequest)
+		h.logger.Warn("Missing Pebble tokens in login request")
+		h.httpError(w, span, "Missing Pebble account or timeline token", nil, http.StatusBadRequest)
 		return
 	}
 
-	b := make([]byte, 32)
-	_, err := rand.Read(b)
+	state, err := generateOAuthState()
 	if err != nil {
-		h.logger.Error("Failed to generate OAuth state", zap.Error(err))
-		http.Error(w, "Failed to generate OAuth state", http.StatusInternalServerError)
+		h.httpError(w, span, "Failed to generate OAuth state", err, http.StatusInternalServerError)
 		return
 	}
-	state := base64.URLEncoding.EncodeToString(b)
 
-	http.SetCookie(w, &http.Cookie{Name: oauthStateCookieName, Value: state, Path: "/", HttpOnly: true, Secure: r.TLS != nil, MaxAge: 300, SameSite: http.SameSiteLaxMode})
-	http.SetCookie(w, &http.Cookie{Name: oauthPebbleAccountTokenCookieName, Value: pebbleAccountToken, Path: "/", HttpOnly: true, Secure: r.TLS != nil, MaxAge: 300, SameSite: http.SameSiteLaxMode})
-	http.SetCookie(w, &http.Cookie{Name: oauthPebbleTimelineTokenCookieName, Value: pebbleTimelineToken, Path: "/", HttpOnly: true, Secure: r.TLS != nil, MaxAge: 300, SameSite: http.SameSiteLaxMode})
+	h.setCookie(w, r, oauthStateCookieName, state, oauthCookieMaxAge)
+	h.setCookie(w, r, oauthPebbleAccountTokenCookieName, pebbleAccountToken, oauthCookieMaxAge)
+	h.setCookie(w, r, oauthPebbleTimelineTokenCookieName, pebbleTimelineToken, oauthCookieMaxAge)
 
 	authURL := h.oauth2Config.AuthCodeURL(state)
 	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
 }
 
-// HandleTodoistCallback handles the callback from Todoist after user authorization.
+// HandleTodoistCallback handles the OAuth2 callback from Todoist.
+// It validates the state, exchanges the code for a token,
+// fetches user info, stores tokens, and redirects back to Pebble.
 func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Request) {
-	ctx, span := h.Tracer.Start(r.Context(), "handleTodoistCallback", trace.WithAttributes(attribute.String("http.method", r.Method)))
+	ctx, span := h.Tracer.Start(r.Context(), "HandleTodoistCallback")
 	defer span.End()
 
-	// if callback returns with an error, redirect to the Pebble config page with error status
-	if r.URL.Query().Get("error") != "" {
-		h.logger.Warn("Todoist OAuth callback returned an error", zap.String("error", r.URL.Query().Get("error")))
-		http.Redirect(w, r, h.config.AppBaseURL+"/config/pebble?status=error&error="+url.QueryEscape(r.URL.Query().Get("error")), http.StatusTemporaryRedirect)
+	// Check for errors from Todoist
+	if errMsg := r.URL.Query().Get("error"); errMsg != "" {
+		h.logger.Warn("Todoist OAuth callback returned an error", zap.String("error", errMsg))
+		h.redirectWithError(w, r, "Todoist authorization failed: "+errMsg)
 		return
 	}
 
+	// Validate state cookie
 	stateCookie, err := r.Cookie(oauthStateCookieName)
-	if err != nil {
-		h.logger.Warn("OAuth state cookie not found", zap.Error(err))
-		http.Error(w, "OAuth state cookie not found", http.StatusBadRequest)
+	if err != nil || r.URL.Query().Get("state") != stateCookie.Value {
+		h.logger.Warn("Invalid OAuth state or cookie not found", zap.Error(err))
+		h.redirectWithError(w, r, "Invalid OAuth state, please try again.")
 		return
 	}
 
-	if r.URL.Query().Get("state") != stateCookie.Value {
-		h.logger.Warn("Invalid OAuth state")
-		http.Error(w, "Invalid OAuth state", http.StatusBadRequest)
-		return
-	}
-
+	// Exchange code for token
 	code := r.URL.Query().Get("code")
 	todoistToken, err := h.oauth2Config.Exchange(ctx, code)
 	if err != nil {
 		h.logger.Error("Failed to exchange Todoist token", zap.Error(err))
-		http.Redirect(w, r, h.config.AppBaseURL+"/config/pebble?status=error&error="+url.QueryEscape("Todoist token exchange failed"), http.StatusTemporaryRedirect)
+		h.redirectWithError(w, r, "Todoist token exchange failed.")
 		return
 	}
-
 	span.SetAttributes(attribute.Bool("todoist.token_exchanged", true))
 
+	// Get Todoist user info
 	todoistUser, err := h.todoistService.GetUser(ctx, todoistToken.AccessToken)
 	if err != nil {
-		h.logger.Error("Failed to get Todoist user ID", zap.Error(err))
-		// Not redirecting on this error, but logging it.
-	}
-
-	pebbleAccountTokenCookie, errAcc := r.Cookie(oauthPebbleAccountTokenCookieName)
-	pebbleTimelineTokenCookie, errTime := r.Cookie(oauthPebbleTimelineTokenCookieName)
-
-	if errAcc != nil || errTime != nil {
-		h.logger.Error("Error retrieving pebble tokens from cookie", zap.Error(errAcc), zap.Error(errTime))
-		http.Redirect(w, r, h.config.AppBaseURL+"/config/pebble?status=error&error="+url.QueryEscape("Session error, please retry configuration"), http.StatusTemporaryRedirect)
+		h.logger.Error("Failed to get Todoist user info", zap.Error(err))
+		h.redirectWithError(w, r, "Failed to retrieve Todoist user information.")
 		return
 	}
 
-	pebbleAccountToken := pebbleAccountTokenCookie.Value
-	pebbleTimelineToken := pebbleTimelineTokenCookie.Value
+	// Retrieve Pebble tokens from cookies
+	pebbleAccountToken, pebbleTimelineToken, err := h.getPebbleTokensFromCookies(r)
+	if err != nil {
+		h.logger.Error("Failed to retrieve Pebble tokens from cookies", zap.Error(err))
+		h.redirectWithError(w, r, "Session error, please retry configuration.")
+		return
+	}
 
+	// Store user data
 	user := storage.User{
 		PebbleAccountToken:  pebbleAccountToken,
 		PebbleTimelineToken: pebbleTimelineToken,
@@ -236,39 +225,40 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 
 	if err := h.tokenStore.StoreTokens(ctx, pebbleAccountToken, user); err != nil {
 		h.logger.Error("Failed to store tokens", zap.Error(err))
-		http.Redirect(w, r, h.config.AppBaseURL+"/config/pebble?status=error&error="+url.QueryEscape("Failed to save configuration"), http.StatusTemporaryRedirect)
+		h.redirectWithError(w, r, "Failed to save configuration.")
 		return
 	}
 
 	// Clear cookies
-	http.SetCookie(w, &http.Cookie{Name: oauthStateCookieName, Path: "/", MaxAge: -1})
-	http.SetCookie(w, &http.Cookie{Name: oauthPebbleAccountTokenCookieName, Path: "/", MaxAge: -1})
-	http.SetCookie(w, &http.Cookie{Name: oauthPebbleTimelineTokenCookieName, Path: "/", MaxAge: -1})
+	h.clearOAuthCookies(w, r)
 
-	h.logger.Info("Successfully authenticated and stored tokens", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Int64("todoistUserID", todoistUser.User.ID))
-	span.SetAttributes(attribute.String("pebble.account_token", pebbleAccountToken), attribute.Int64("todoist.user_id", todoistUser.User.ID))
+	h.logger.Info("Successfully authenticated and stored tokens",
+		zap.String("pebbleAccountToken", pebbleAccountToken),
+		zap.Int64("todoistUserID", todoistUser.User.ID),
+	)
+	span.SetAttributes(
+		attribute.String("pebble.account_token", pebbleAccountToken),
+		attribute.Int64("todoist.user_id", todoistUser.User.ID),
+	)
 
 	// Redirect to Pebble close with success
-	http.Redirect(w, r, "pebblejs://close#{\"status\":\"success\"}", http.StatusTemporaryRedirect)
+	http.Redirect(w, r, pebbleCloseSuccessURL, http.StatusTemporaryRedirect)
 }
 
 // HandleTodoistWebhook processes incoming webhooks from Todoist.
+// It verifies the signature, parses the payload, and processes relevant events.
 func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx, span := h.Tracer.Start(r.Context(), "HandleTodoistWebhook")
 	defer span.End()
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		h.logger.Error("Failed to read webhook body", zap.Error(err))
-		span.SetStatus(codes.Error, "Failed to read body")
-		span.RecordError(err)
-		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+		h.httpError(w, span, "Failed to read webhook body", err, http.StatusInternalServerError)
 		return
 	}
-	defer func(Body io.ReadCloser) {
-		_ = Body.Close()
-	}(r.Body)
+	defer r.Body.Close()
 
+	// Verify signature
 	signature := r.Header.Get("X-Todoist-Hmac-SHA256")
 	if !h.Utils.VerifyTodoistSignature(signature, body) {
 		h.logger.Warn("Invalid Todoist webhook signature")
@@ -277,12 +267,10 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Unmarshal payload
 	var payload todoist.WebhookPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
-		h.logger.Error("Failed to unmarshal webhook payload", zap.Error(err))
-		span.SetStatus(codes.Error, "Failed to unmarshal payload")
-		span.RecordError(err)
-		http.Error(w, "Failed to parse request body", http.StatusBadRequest)
+		h.httpError(w, span, "Failed to unmarshal webhook payload", err, http.StatusBadRequest)
 		return
 	}
 
@@ -292,98 +280,184 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 	)
 	h.logger.Info("Received Todoist webhook", zap.String("eventName", payload.EventName), zap.Int64("userID", payload.UserID))
 
-	// Fetch user tokens using Todoist User ID
+	// Fetch user tokens
 	user, found, err := h.tokenStore.GetTokensByTodoistUserID(ctx, payload.UserID)
-	if err != nil {
-		h.logger.Error("Failed to get tokens by Todoist User ID for webhook", zap.Int64("todoistUserID", payload.UserID), zap.Error(err))
+	if err != nil || !found {
+		logMsg := "Failed to get tokens by Todoist User ID"
+		if !found {
+			logMsg = "No tokens found for Todoist User ID"
+		}
+		h.logger.Warn(logMsg, zap.Int64("todoistUserID", payload.UserID), zap.Error(err))
+		span.SetStatus(codes.Error, logMsg)
 		span.RecordError(err)
-		// Still return 200 OK to Todoist as per their recommendation for webhook errors not to retry indefinitely
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	if !found {
-		h.logger.Warn("No tokens found for Todoist User ID from webhook", zap.Int64("todoistUserID", payload.UserID))
-		span.SetStatus(codes.Error, "User tokens not found for webhook user ID")
-		// Still return 200 OK
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusOK) // Return 200 OK to prevent retries
 		return
 	}
 
+	// Process event
 	switch payload.EventName {
 	case "item:added", "item:updated":
-		var taskData todoist.TaskEventData
-		if err := json.Unmarshal(payload.EventData, &taskData); err != nil {
-			h.logger.Error("Failed to unmarshal task data from webhook", zap.Error(err), zap.String("eventName", payload.EventName))
-			span.RecordError(err)
-			w.WriteHeader(http.StatusOK) // Acknowledge webhook
-			return
-		}
-
-		if taskData.Due == nil || taskData.Due.Date == "" {
-			h.logger.Info("Task has no due date, skipping pin creation", zap.String("taskID", taskData.ID), zap.String("taskContent", taskData.Content))
-			span.SetAttributes(attribute.String("app.pin_skipped_reason", "no_due_date"))
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		dueTime, err := h.Utils.ParseTodoistDueDateTime(taskData.Due, user.Timezone)
-		if err != nil {
-			h.logger.Error("Failed to parse due date from webhook task", zap.Error(err), zap.Any("dueObject", taskData.Due))
-			span.RecordError(err)
-			w.WriteHeader(http.StatusOK) // Acknowledge webhook
-			return
-		}
-
-		pin := pebble.Pin{
-			ID:   fmt.Sprintf("todoist-%d-%s", payload.UserID, taskData.ID),
-			Time: dueTime.Format(time.RFC3339),
-			Layout: pebble.PinLayout{
-				Type:     "genericPin",
-				Title:    taskData.Content,
-				TinyIcon: "system://images/NOTIFICATION_FLAG",
-			},
-		}
-
-		pinJSON, err := json.Marshal(pin)
-		if err != nil {
-			h.logger.Error("Failed to marshal Pebble pin for webhook task", zap.Error(err))
-			span.RecordError(err)
-			w.WriteHeader(http.StatusOK) // Acknowledge webhook
-			return
-		}
-
-		if user.PebbleTimelineToken == "" {
-			h.logger.Warn("User has no Pebble Timeline Token, cannot push pin", zap.Int64("todoistUserID", payload.UserID))
-			span.SetAttributes(attribute.String("app.pin_skipped_reason", "no_pebble_timeline_token"))
-			w.WriteHeader(http.StatusOK) // Acknowledge webhook
-			return
-		}
-
-		if err, statusCode := h.pebbleTimelineService.PushPin(ctx, user.PebbleTimelineToken, pinJSON); err != nil {
-			h.logger.Error("Failed to push Pebble pin from webhook task", zap.Error(err), zap.String("pinID", pin.ID))
-			span.RecordError(err)
-			// Still return 200 OK to Todoist
-			w.WriteHeader(http.StatusOK)
-
-			// if the status_code is 410, delete their account. the timeline token is no longer valid.
-			if statusCode == http.StatusGone {
-				h.logger.Warn("Pebble Timeline token is no longer valid, deleting user account", zap.Int64("todoistUserID", payload.UserID))
-				if errDel := h.tokenStore.DeleteTokensByTodoistUserID(ctx, payload.UserID); errDel != nil {
-					h.logger.Error("Failed to delete user tokens after Pebble Timeline token invalidation", zap.Error(errDel), zap.Int64("todoistUserID", payload.UserID))
-				} else {
-					h.logger.Info("Successfully deleted user tokens after Pebble Timeline token invalidation", zap.Int64("todoistUserID", payload.UserID))
-				}
-			}
-
-			return
-		}
-		h.logger.Info("Successfully pushed Pebble pin from webhook task", zap.String("pinID", pin.ID))
-		span.SetAttributes(attribute.String("app.pin_id_pushed", pin.ID))
-
+		h.processTaskEvent(ctx, span, user, payload)
+	// Add cases for "item:deleted", "item:completed" if needed
 	default:
 		h.logger.Info("Unhandled webhook event type", zap.String("eventName", payload.EventName))
 		span.SetAttributes(attribute.String("app.webhook_unhandled_event", payload.EventName))
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusOK) // Acknowledge webhook
+}
+
+// --- Helper Functions ---
+
+// processTaskEvent handles item:added and item:updated webhook events.
+func (h *HttpHandlers) processTaskEvent(ctx context.Context, span trace.Span, user storage.User, payload todoist.WebhookPayload) {
+	var taskData todoist.TaskEventData
+	if err := json.Unmarshal(payload.EventData, &taskData); err != nil {
+		h.logger.Error("Failed to unmarshal task data from webhook", zap.Error(err), zap.String("eventName", payload.EventName))
+		span.RecordError(err)
+		return
+	}
+
+	// Skip if no due date
+	if taskData.Due == nil || taskData.Due.Date == "" {
+		h.logger.Info("Task has no due date, skipping pin creation", zap.String("taskID", taskData.ID))
+		span.SetAttributes(attribute.String("app.pin_skipped_reason", "no_due_date"))
+		return
+	}
+
+	// Parse due date
+	dueTime, err := h.Utils.ParseTodoistDueDateTime(taskData.Due, user.Timezone)
+	if err != nil {
+		h.logger.Error("Failed to parse due date from webhook task", zap.Error(err), zap.Any("dueObject", taskData.Due))
+		span.RecordError(err)
+		return
+	}
+
+	// Create and marshal pin
+	pin := createPebblePin(payload.UserID, taskData, dueTime)
+	pinJSON, err := json.Marshal(pin)
+	if err != nil {
+		h.logger.Error("Failed to marshal Pebble pin for webhook task", zap.Error(err))
+		span.RecordError(err)
+		return
+	}
+
+	// Ensure Pebble Timeline Token exists
+	if user.PebbleTimelineToken == "" {
+		h.logger.Warn("User has no Pebble Timeline Token, cannot push pin", zap.Int64("todoistUserID", payload.UserID))
+		span.SetAttributes(attribute.String("app.pin_skipped_reason", "no_pebble_timeline_token"))
+		return
+	}
+
+	// Push pin to Pebble
+	err, statusCode := h.pebbleTimelineService.PushPin(ctx, user.PebbleTimelineToken, pinJSON)
+	if err != nil {
+		h.logger.Error("Failed to push Pebble pin from webhook task", zap.Error(err), zap.String("pinID", pin.ID))
+		span.RecordError(err)
+		// Handle 410 Gone: Token is invalid, delete the user account
+		if statusCode == http.StatusGone {
+			h.handleInvalidPebbleToken(ctx, payload.UserID)
+		}
+		return
+	}
+
+	h.logger.Info("Successfully pushed Pebble pin from webhook task", zap.String("pinID", pin.ID))
+	span.SetAttributes(attribute.String("app.pin_id_pushed", pin.ID))
+}
+
+// handleInvalidPebbleToken deletes user data when their Pebble token is invalid (410 Gone).
+func (h *HttpHandlers) handleInvalidPebbleToken(ctx context.Context, userID int64) {
+	h.logger.Warn("Pebble Timeline token is no longer valid, deleting user account", zap.Int64("todoistUserID", userID))
+	if err := h.tokenStore.DeleteTokensByTodoistUserID(ctx, userID); err != nil {
+		h.logger.Error("Failed to delete user tokens after 410", zap.Error(err), zap.Int64("todoistUserID", userID))
+	} else {
+		h.logger.Info("Successfully deleted user tokens after 410", zap.Int64("todoistUserID", userID))
+	}
+}
+
+// createPebblePin constructs a Pebble Pin object from task data.
+func createPebblePin(userID int64, taskData todoist.TaskEventData, dueTime time.Time) pebble.Pin {
+	return pebble.Pin{
+		ID:   fmt.Sprintf("todoist-%d-%s", userID, taskData.ID),
+		Time: dueTime.Format(time.RFC3339),
+		Layout: pebble.PinLayout{
+			Type:     "genericPin",
+			Title:    taskData.Content,
+			TinyIcon: "system://images/NOTIFICATION_FLAG",
+		},
+	}
+}
+
+// getPebbleTokensFromCookies retrieves Pebble account and timeline tokens from request cookies.
+func (h *HttpHandlers) getPebbleTokensFromCookies(r *http.Request) (string, string, error) {
+	pebbleAccountTokenCookie, errAcc := r.Cookie(oauthPebbleAccountTokenCookieName)
+	pebbleTimelineTokenCookie, errTime := r.Cookie(oauthPebbleTimelineTokenCookieName)
+
+	if errAcc != nil {
+		return "", "", fmt.Errorf("account token cookie error: %w", errAcc)
+	}
+	if errTime != nil {
+		return "", "", fmt.Errorf("timeline token cookie error: %w", errTime)
+	}
+
+	return pebbleAccountTokenCookie.Value, pebbleTimelineTokenCookie.Value, nil
+}
+
+// clearOAuthCookies removes OAuth-related cookies.
+func (h *HttpHandlers) clearOAuthCookies(w http.ResponseWriter, r *http.Request) {
+	h.setCookie(w, r, oauthStateCookieName, "", -1)
+	h.setCookie(w, r, oauthPebbleAccountTokenCookieName, "", -1)
+	h.setCookie(w, r, oauthPebbleTimelineTokenCookieName, "", -1)
+}
+
+// renderConfigPage renders the config.html template with the given data and status code.
+func (h *HttpHandlers) renderConfigPage(w http.ResponseWriter, data map[string]string, statusCode int) {
+	w.WriteHeader(statusCode)
+	if err := h.htmlManager.Render(w, "config.html", data); err != nil {
+		h.logger.Error("Failed to render config page", zap.Error(err), zap.Any("data", data))
+		http.Error(w, "Failed to render page", http.StatusInternalServerError)
+	}
+}
+
+// redirectWithError redirects the user to the Pebble config page with an error message.
+func (h *HttpHandlers) redirectWithError(w http.ResponseWriter, r *http.Request, message string) {
+	h.logger.Warn("Redirecting with error", zap.String("message", message))
+	redirectURL := fmt.Sprintf("%s/config/pebble?status=error&error=%s",
+		h.config.AppBaseURL,
+		url.QueryEscape(message),
+	)
+	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+}
+
+// httpError logs an error, updates the span, and sends an HTTP error response.
+func (h *HttpHandlers) httpError(w http.ResponseWriter, span trace.Span, message string, err error, statusCode int) {
+	h.logger.Error(message, zap.Error(err))
+	if span != nil {
+		span.SetStatus(codes.Error, message)
+		span.RecordError(err)
+	}
+	http.Error(w, message, statusCode)
+}
+
+// setCookie sets an HTTP cookie with common secure defaults.
+func (h *HttpHandlers) setCookie(w http.ResponseWriter, r *http.Request, name, value string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https", // Check for TLS or proxy
+		MaxAge:   maxAge,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// generateOAuthState creates a random base64 string for OAuth state.
+func generateOAuthState() (string, error) {
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", fmt.Errorf("failed to read random bytes for state: %w", err)
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
 }
