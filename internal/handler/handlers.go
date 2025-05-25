@@ -17,11 +17,9 @@
 package handler
 
 import (
-	"crypto/hmac"
+	"blockarchitech.com/timetodo/internal/utils"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,6 +37,8 @@ import (
 	"blockarchitech.com/timetodo/internal/config"
 	"blockarchitech.com/timetodo/internal/service"
 	"blockarchitech.com/timetodo/internal/storage"
+	"blockarchitech.com/timetodo/internal/types/pebble"
+	"blockarchitech.com/timetodo/internal/types/todoist"
 	"blockarchitech.com/timetodo/internal/view"
 )
 
@@ -58,6 +58,7 @@ type HttpHandlers struct {
 	pebbleTimelineService *service.PebbleTimelineService
 	todoistService        *service.TodoistService
 	Tracer                trace.Tracer
+	Utils                 *utils.TodoistUtils
 }
 
 // NewHttpHandlers creates a new HttpHandlers instance.
@@ -71,6 +72,7 @@ func NewHttpHandlers(logger *zap.Logger, oauth2Config *oauth2.Config, tokenStore
 		pebbleTimelineService: pebbleService,
 		todoistService:        todoistService,
 		Tracer:                tracer,
+		Utils:                 utils.NewTodoistUtils(cfg, logger.Named("todoist_utils")),
 	}
 }
 
@@ -250,50 +252,6 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 	http.Redirect(w, r, "pebblejs://close#{\"status\":\"success\"}", http.StatusTemporaryRedirect)
 }
 
-// --- Todoist Webhook Handler ---
-
-// TodoistWebhookPayload defines the structure for incoming webhook events.
-type TodoistWebhookPayload struct {
-	EventName string          `json:"event_name"`
-	UserID    int64           `json:"user_id,string"`
-	EventData json.RawMessage `json:"event_data"`
-	Initiator json.RawMessage `json:"initiator,omitempty"`
-}
-
-// TodoistDueDate represents the due date object from Todoist API
-type TodoistDueDate struct {
-	Date        string `json:"date"`
-	String      string `json:"string"`
-	Lang        string `json:"lang,omitempty"`
-	Timezone    string `json:"timezone,omitempty"`
-	IsRecurring bool   `json:"is_recurring"`
-}
-
-// TodoistTaskEventData represents the event_data for item-related webhooks
-type TodoistTaskEventData struct {
-	ID          string          `json:"id"`
-	Content     string          `json:"content"`
-	Description string          `json:"description,omitempty"`
-	Due         *TodoistDueDate `json:"due,omitempty"`
-	Priority    int             `json:"priority"`
-	ProjectID   string          `json:"project_id,omitempty"`
-	UserID      int64           `json:"user_id,string"` // This is the user_id from the task data itself
-}
-
-// PebblePinLayout defines the layout of a Pebble timeline pin.
-type PebblePinLayout struct {
-	Type     string `json:"type"`
-	Title    string `json:"title"`
-	TinyIcon string `json:"tinyIcon"`
-}
-
-// PebblePin defines the structure of a Pebble timeline pin.
-type PebblePin struct {
-	ID     string          `json:"id"`
-	Time   string          `json:"time"`
-	Layout PebblePinLayout `json:"layout"`
-}
-
 // HandleTodoistWebhook processes incoming webhooks from Todoist.
 func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx, span := h.Tracer.Start(r.Context(), "HandleTodoistWebhook")
@@ -307,17 +265,19 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
 		return
 	}
-	defer r.Body.Close()
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(r.Body)
 
 	signature := r.Header.Get("X-Todoist-Hmac-SHA256")
-	if !h.verifyTodoistSignature(signature, body) {
+	if !h.Utils.VerifyTodoistSignature(signature, body) {
 		h.logger.Warn("Invalid Todoist webhook signature")
 		span.SetStatus(codes.Error, "Invalid signature")
 		http.Error(w, "Invalid signature", http.StatusForbidden)
 		return
 	}
 
-	var payload TodoistWebhookPayload
+	var payload todoist.WebhookPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		h.logger.Error("Failed to unmarshal webhook payload", zap.Error(err))
 		span.SetStatus(codes.Error, "Failed to unmarshal payload")
@@ -351,7 +311,7 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 
 	switch payload.EventName {
 	case "item:added", "item:updated":
-		var taskData TodoistTaskEventData
+		var taskData todoist.TaskEventData
 		if err := json.Unmarshal(payload.EventData, &taskData); err != nil {
 			h.logger.Error("Failed to unmarshal task data from webhook", zap.Error(err), zap.String("eventName", payload.EventName))
 			span.RecordError(err)
@@ -366,7 +326,7 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 			return
 		}
 
-		dueTime, err := parseTodoistDueDateTime(taskData.Due, user.TimezoneHourOffset)
+		dueTime, err := h.Utils.ParseTodoistDueDateTime(taskData.Due, user.Timezone)
 		if err != nil {
 			h.logger.Error("Failed to parse due date from webhook task", zap.Error(err), zap.Any("dueObject", taskData.Due))
 			span.RecordError(err)
@@ -374,10 +334,10 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 			return
 		}
 
-		pin := PebblePin{
+		pin := pebble.Pin{
 			ID:   fmt.Sprintf("todoist-%d-%s", payload.UserID, taskData.ID),
 			Time: dueTime.Format(time.RFC3339),
-			Layout: PebblePinLayout{
+			Layout: pebble.PinLayout{
 				Type:     "genericPin",
 				Title:    taskData.Content,
 				TinyIcon: "system://images/NOTIFICATION_FLAG",
@@ -399,14 +359,14 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 			return
 		}
 
-		if err, status_code := h.pebbleTimelineService.PushPin(ctx, user.PebbleTimelineToken, pinJSON); err != nil {
+		if err, statusCode := h.pebbleTimelineService.PushPin(ctx, user.PebbleTimelineToken, pinJSON); err != nil {
 			h.logger.Error("Failed to push Pebble pin from webhook task", zap.Error(err), zap.String("pinID", pin.ID))
 			span.RecordError(err)
 			// Still return 200 OK to Todoist
 			w.WriteHeader(http.StatusOK)
 
 			// if the status_code is 410, delete their account. the timeline token is no longer valid.
-			if status_code == http.StatusGone {
+			if statusCode == http.StatusGone {
 				h.logger.Warn("Pebble Timeline token is no longer valid, deleting user account", zap.Int64("todoistUserID", payload.UserID))
 				if errDel := h.tokenStore.DeleteTokensByTodoistUserID(ctx, payload.UserID); errDel != nil {
 					h.logger.Error("Failed to delete user tokens after Pebble Timeline token invalidation", zap.Error(errDel), zap.Int64("todoistUserID", payload.UserID))
@@ -426,48 +386,4 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.WriteHeader(http.StatusOK)
-}
-
-// verifyTodoistSignature verifies the HMAC SHA256 signature of the Todoist webhook.
-func (h *HttpHandlers) verifyTodoistSignature(signatureHeader string, body []byte) bool {
-	mac := hmac.New(sha256.New, []byte(h.config.TodoistClientSecret))
-	mac.Write(body)
-	expectedMAC := hex.EncodeToString(mac.Sum(nil))
-	// base64-decode the signature header
-	if signatureHeader == "" {
-		h.logger.Warn("Empty signature header received from Todoist webhook")
-		return false
-	}
-	decodedHeader, err := base64.StdEncoding.DecodeString(signatureHeader)
-	if err != nil {
-		h.logger.Error("Failed to decode Todoist signature header", zap.Error(err))
-		return false
-	}
-	headerHex := hex.EncodeToString(decodedHeader)
-	return hmac.Equal([]byte(headerHex), []byte(expectedMAC))
-}
-
-// parseTodoistDueDateTime converts a Todoist DueDate object to a time.Time object.
-func parseTodoistDueDateTime(due *TodoistDueDate, offset int) (time.Time, error) {
-	if due == nil {
-		return time.Time{}, fmt.Errorf("due object is nil")
-	}
-	// try to parse as RFC3339 first. if that fails, parse as Todoist's made-up RFC3339 format (YYYY-MM-DDTHH:MM:SS). if that fails, parse as a date-only string (YYYY-MM-DD). if that fails, return an error.
-	layouts := []string{
-		time.RFC3339,          // Standard RFC3339 format
-		"2006-01-02T15:04:05", // Made-up RFC3339 format
-	}
-	for _, layout := range layouts {
-		if t, err := time.Parse(layout, due.Date); err == nil {
-			// if we are using the made-up RFC3339 format, use the provided offset to adjust the time
-			if layout == "2006-01-02T15:04:05" {
-				t = t.Add(-time.Duration(offset) * time.Hour)
-			}
-			return t, nil
-		}
-	}
-	if t, err := time.Parse("2006-01-02", due.Date); err == nil {
-		return t, nil
-	}
-	return time.Time{}, fmt.Errorf("failed to parse due date: %s", due.Date)
 }
