@@ -453,27 +453,25 @@ func parseTodoistDueDateTime(due *TodoistDueDate) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("due object is nil")
 	}
 
-	if due.Date != "" {
-		rfcDate, err := time.Parse(time.RFC3339, due.Date)
-		if err == nil {
-			return rfcDate, nil
-		}
-		// If it's just a date, assume it's for the start of that day in the user's local timezone (or UTC if not specified).
-		// For simplicity, parsing as is. If a specific time (e.g., midnight) is needed, adjust accordingly.
-		layout := "2006-01-02"
-		parsedTime, err := time.Parse(layout, due.Date)
-		if err == nil {
-			// If a timezone is specified with a date-only due date, it's ambiguous.
-			// Assume the date is in that timezone. For a pin, we need a specific instant.
-			// Defaulting to midnight in the given timezone if available, otherwise UTC.
-			if due.Timezone != "" {
-				loc, errLoc := time.LoadLocation(due.Timezone)
-				if errLoc == nil {
-					return time.Date(parsedTime.Year(), parsedTime.Month(), parsedTime.Day(), 0, 0, 0, 0, loc), nil
-				}
+	rfcDate, err := time.Parse(time.RFC3339, due.Date)
+	if err == nil {
+		return rfcDate, nil
+	}
+	// If it's just a date, assume it's for the start of that day in the user's local timezone (or UTC if not specified).
+	// For simplicity, parsing as is. If a specific time (e.g., midnight) is needed, adjust accordingly.
+	layout := "2006-01-02"
+	parsedTime, err := time.Parse(layout, due.Date)
+	if err == nil {
+		// If a timezone is specified with a date-only due date, it's ambiguous.
+		// Assume the date is in that timezone. For a pin, we need a specific instant.
+		// Defaulting to midnight in the given timezone if available, otherwise UTC.
+		if due.Timezone != "" {
+			loc, errLoc := time.LoadLocation(due.Timezone)
+			if errLoc == nil {
+				return time.Date(parsedTime.Year(), parsedTime.Month(), parsedTime.Day(), 0, 0, 0, 0, loc), nil
 			}
-			return parsedTime, nil // As midnight UTC if no timezone
 		}
+		return parsedTime, nil // As midnight UTC if no timezone
 	}
 
 	return time.Time{}, fmt.Errorf("failed to parse due date/datetime: %s", due.Date)
