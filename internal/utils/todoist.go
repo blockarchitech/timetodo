@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"go.uber.org/zap"
 	"time"
+	_ "time/tzdata"
 )
 
 // TodoistUtils provides utility functions for interacting with Todoist webhooks and data.
