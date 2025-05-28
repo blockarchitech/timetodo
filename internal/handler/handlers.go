@@ -203,7 +203,7 @@ func (h *HttpHandlers) HandleDeletePage(w http.ResponseWriter, r *http.Request) 
 			fetch('/api/v1/me', {
 				method: 'DELETE',
 				headers: {
-					'Authorization': 'Bearer ' + '%s' + ' ' + '%s'
+					'Authorization': 'Bearer ' + btoa('%s:%s')
 				}
 			}).then(response => {
 				if (response.ok) {
