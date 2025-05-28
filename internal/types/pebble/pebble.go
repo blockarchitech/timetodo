@@ -20,7 +20,7 @@ package pebble
 type PinLayout struct {
 	Type     string `json:"type"`
 	Title    string `json:"title"`
-	Body     string `json:"body"`
+	Body     string `json:"body,omitempty"`
 	TinyIcon string `json:"tinyIcon"`
 }
 

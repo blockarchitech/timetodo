@@ -83,7 +83,7 @@ func (u *TodoistUtils) ParseTodoistDueDateTime(due *todoist.DueDate, timezone st
 				t = t.In(loc)
 				_, offset := t.Zone()
 
-				t = t.Add(time.Duration(offset) * time.Second)
+				t = t.Add(time.Duration(offset) * time.Hour)
 			}
 			return t, nil
 		}
