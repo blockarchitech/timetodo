@@ -487,6 +487,7 @@ func createPebblePin(userID int64, taskData todoist.TaskEventData, dueTime time.
 		Layout: pebble.PinLayout{
 			Type:     "genericPin",
 			Title:    taskData.Content,
+			Body:     taskData.Description + "\n\nDue: " + dueTime.Format("2006-01-02 15:04"),
 			TinyIcon: "system://images/NOTIFICATION_FLAG",
 		},
 	}
