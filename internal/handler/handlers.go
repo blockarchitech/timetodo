@@ -35,7 +35,6 @@ import (
 	"golang.org/x/oauth2"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
 )
 
@@ -278,7 +277,7 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 	// Check for errors from Todoist
 	if errMsg := r.URL.Query().Get("error"); errMsg != "" {
 		h.logger.Warn("Todoist OAuth callback returned an error", zap.String("error", errMsg))
-		h.redirectWithError(w, r, "Todoist authorization failed: "+errMsg)
+		http.Error(w, "Todoist OAuth error: "+errMsg, http.StatusBadRequest)
 		return
 	}
 
@@ -286,7 +285,7 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 	stateCookie, err := r.Cookie(oauthStateCookieName)
 	if err != nil || r.URL.Query().Get("state") != stateCookie.Value {
 		h.logger.Warn("Invalid OAuth state or cookie not found", zap.Error(err))
-		h.redirectWithError(w, r, "Invalid OAuth state, please try again.")
+		http.Error(w, "Invalid state or cookie not found", http.StatusBadRequest)
 		return
 	}
 
@@ -295,7 +294,7 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 	todoistToken, err := h.oauth2Config.Exchange(ctx, code)
 	if err != nil {
 		h.logger.Error("Failed to exchange Todoist token", zap.Error(err))
-		h.redirectWithError(w, r, "Todoist token exchange failed.")
+		http.Error(w, "Failed to exchange Todoist token", http.StatusInternalServerError)
 		return
 	}
 	span.SetAttributes(attribute.Bool("todoist.token_exchanged", true))
@@ -304,7 +303,7 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 	todoistUser, err := h.todoistService.GetUser(ctx, todoistToken.AccessToken)
 	if err != nil {
 		h.logger.Error("Failed to get Todoist user info", zap.Error(err))
-		h.redirectWithError(w, r, "Failed to retrieve Todoist user information.")
+		http.Error(w, "Failed to retrieve Todoist user info", http.StatusInternalServerError)
 		return
 	}
 
@@ -312,7 +311,7 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 	pebbleAccountToken, pebbleTimelineToken, err := h.getPebbleTokensFromCookies(r)
 	if err != nil {
 		h.logger.Error("Failed to retrieve Pebble tokens from cookies", zap.Error(err))
-		h.redirectWithError(w, r, "Session error, please retry configuration.")
+		http.Error(w, "Failed to retrieve Pebble tokens", http.StatusInternalServerError)
 		return
 	}
 
@@ -329,7 +328,7 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 
 	if err := h.tokenStore.StoreTokens(ctx, pebbleAccountToken, user); err != nil {
 		h.logger.Error("Failed to store tokens", zap.Error(err))
-		h.redirectWithError(w, r, "Failed to save configuration.")
+		http.Error(w, "Failed to store user tokens", http.StatusInternalServerError)
 		return
 	}
 
@@ -513,16 +512,6 @@ func (h *HttpHandlers) clearOAuthCookies(w http.ResponseWriter, r *http.Request)
 	h.setCookie(w, r, oauthStateCookieName, "", -1)
 	h.setCookie(w, r, oauthPebbleAccountTokenCookieName, "", -1)
 	h.setCookie(w, r, oauthPebbleTimelineTokenCookieName, "", -1)
-}
-
-// redirectWithError redirects the user to the Pebble config page with an error message.
-func (h *HttpHandlers) redirectWithError(w http.ResponseWriter, r *http.Request, message string) {
-	h.logger.Warn("Redirecting with error", zap.String("message", message))
-	redirectURL := fmt.Sprintf("%s/config/pebble?status=error&error=%s",
-		h.config.AppBaseURL,
-		url.QueryEscape(message),
-	)
-	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 }
 
 // httpError logs an error, updates the span, and sends an HTTP error response.
