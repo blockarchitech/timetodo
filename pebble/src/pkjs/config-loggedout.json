@@ -1,0 +1,25 @@
+[
+    {
+        "type": "heading",
+        "defaultValue": "TimeToDo",
+        "size": 1
+    },
+    {
+        "type": "section",
+        "items": [
+            {
+                "type": "heading",
+                "defaultValue": "Account"
+            },
+            {
+                "type": "text",
+                "defaultValue": "You are not logged in. Please log in to start syncing."
+            },
+            {
+                "type": "button",
+                "defaultValue": "Log In",
+                "id": "loginButton"
+            }
+        ]
+    }
+]
