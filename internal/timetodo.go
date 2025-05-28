@@ -38,7 +38,6 @@ import (
 	"blockarchitech.com/timetodo/internal/handler"
 	"blockarchitech.com/timetodo/internal/service"
 	"blockarchitech.com/timetodo/internal/storage"
-	"blockarchitech.com/timetodo/internal/view"
 )
 
 // newLogger creates a new Zap logger.
@@ -144,16 +143,6 @@ func newTokenStore(lc fx.Lifecycle, logger *zap.Logger, cfg *config.Config) (sto
 	return tokenStore, nil
 }
 
-// newHTMLTemplateManager initializes the HTML template manager.
-func newHTMLTemplateManager(logger *zap.Logger) (*view.HTMLTemplateManager, error) {
-	tmpls, err := view.NewHTMLTemplateManager(logger, "templates")
-	if err != nil {
-		logger.Error("Failed to initialize templates. Config pages will fail.", zap.Error(err))
-		return nil, err
-	}
-	return tmpls, nil
-}
-
 // newPebbleTimelineService creates a new PebbleTimelineService.
 func newPebbleTimelineService(cfg *config.Config, tracer oteltrace.Tracer, logger *zap.Logger) *service.PebbleTimelineService {
 	return service.NewPebbleTimelineService(cfg.PebbleTimelineAPIURL, tracer, logger)
@@ -169,12 +158,11 @@ func newHttpHandlers(
 	logger *zap.Logger,
 	cfg *config.Config,
 	tokenStore storage.TokenStore,
-	tmpls *view.HTMLTemplateManager,
 	todoistService *service.TodoistService,
 	pebbleService *service.PebbleTimelineService,
 	tracer oteltrace.Tracer,
 ) *handler.HttpHandlers {
-	return handler.NewHttpHandlers(logger, cfg.TodoistOAuthConfig, tokenStore, tmpls, cfg, todoistService, pebbleService, tracer)
+	return handler.NewHttpHandlers(logger, cfg.TodoistOAuthConfig, tokenStore, cfg, todoistService, pebbleService, tracer)
 }
 
 // registerHooks sets up the HTTP server and routes.
@@ -186,13 +174,26 @@ func registerHooks(
 	tp oteltrace.TracerProvider,
 ) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /config/pebble", handlers.HandlePebbleConfig)
-	mux.HandleFunc("GET /auth/todoist/login", handlers.HandleTodoistLogin)
-	mux.HandleFunc("GET /auth/todoist/callback", handlers.HandleTodoistCallback)
-	mux.HandleFunc("POST /webhooks/todoist", handlers.HandleTodoistWebhook)
+	mux.HandleFunc("GET /api/v1/me", handlers.HandleMe)
+	mux.HandleFunc("POST /api/v1/todoist", handlers.HandleTodoistWebhook)
+
+	mux.HandleFunc("GET /auth/login", handlers.HandleTodoistLogin)
+	mux.HandleFunc("GET /auth/callback", handlers.HandleTodoistCallback)
+
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
+	})
+	mux.HandleFunc("GET /robots.txt", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("User-agent: *\nDisallow: /\n")) // go away!!!!!!
+	})
+
+	mux.HandleFunc("GET /api/v1/googletasks", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<html><body><img src=\"https://http.cat/418\" alt=\"I'm a teapot\" /></body></html>"))
 	})
 
 	var httpHandler http.Handler = mux
@@ -239,7 +240,6 @@ func NewApp() *fx.App {
 			newOtelTracerProvider,
 			newTracer,
 			newTokenStore,
-			newHTMLTemplateManager,
 			newPebbleTimelineService,
 			newTodoistService,
 			newHttpHandlers,

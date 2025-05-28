@@ -23,7 +23,6 @@ import (
 	"blockarchitech.com/timetodo/internal/types/pebble"
 	"blockarchitech.com/timetodo/internal/types/todoist"
 	"blockarchitech.com/timetodo/internal/utils"
-	"blockarchitech.com/timetodo/internal/view"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -54,7 +53,6 @@ type HttpHandlers struct {
 	tokenStore            storage.TokenStore
 	oauth2Config          *oauth2.Config
 	config                *config.Config
-	htmlManager           *view.HTMLTemplateManager
 	pebbleTimelineService *service.PebbleTimelineService
 	todoistService        *service.TodoistService
 	Tracer                trace.Tracer
@@ -66,7 +64,6 @@ func NewHttpHandlers(
 	logger *zap.Logger,
 	oauth2Config *oauth2.Config,
 	tokenStore storage.TokenStore,
-	htmlManager *view.HTMLTemplateManager,
 	cfg *config.Config,
 	todoistService *service.TodoistService,
 	pebbleService *service.PebbleTimelineService,
@@ -77,7 +74,6 @@ func NewHttpHandlers(
 		tokenStore:            tokenStore,
 		oauth2Config:          oauth2Config,
 		config:                cfg,
-		htmlManager:           htmlManager,
 		pebbleTimelineService: pebbleService,
 		todoistService:        todoistService,
 		Tracer:                tracer,
@@ -87,45 +83,54 @@ func NewHttpHandlers(
 
 // --- HTTP Handlers ---
 
-// HandlePebbleConfig serves the Pebble configuration page.
-// It checks for Pebble tokens and existing authentication,
-// otherwise, it provides a login URL.
-func (h *HttpHandlers) HandlePebbleConfig(w http.ResponseWriter, r *http.Request) {
+// HandleMe handles the HTTP request the Clay config page makes to check if the user exists and is authenticated via Todoist.
+func (h *HttpHandlers) HandleMe(w http.ResponseWriter, r *http.Request) {
 	ctx, span := h.Tracer.Start(r.Context(), "HandlePebbleConfig")
 	defer span.End()
 
-	pebbleTimelineToken := r.URL.Query().Get("timeline_token")
-	pebbleAccountToken := r.URL.Query().Get("account_token")
-
-	span.SetAttributes(
-		attribute.Bool("pebble.timeline_token_present", pebbleTimelineToken != ""),
-		attribute.Bool("pebble.account_token_present", pebbleAccountToken != ""),
-	)
-
-	data := make(map[string]string)
-
-	if pebbleTimelineToken == "" || pebbleAccountToken == "" {
-		h.logger.Warn("Missing required Pebble tokens in config request")
-		data["error"] = "Missing required Pebble tokens. Please open from Pebble app settings."
-		h.renderConfigPage(w, data, http.StatusBadRequest)
+	// Check for Authorization header
+	pebbleAccountToken, pebbleTimelineToken, err := getTokensFromHeader(r)
+	if err != nil {
+		h.logger.Warn("Missing or invalid Authorization header", zap.Error(err))
+		span.RecordError(err)
+		h.httpError(w, span, "Unauthorized", err, http.StatusUnauthorized)
 		return
 	}
 
+	// Retrieve user tokens from storage
 	user, found, err := h.tokenStore.GetTokensByPebbleAccount(ctx, pebbleAccountToken)
 	if err != nil {
-		h.logger.Error("Error getting tokens by Pebble account", zap.Error(err))
-		data["status"] = "error"
-		data["error"] = "Could not retrieve stored configuration."
-		h.renderConfigPage(w, data, http.StatusInternalServerError)
+		h.logger.Error("Failed to retrieve user tokens", zap.Error(err), zap.String("pebbleAccountToken", pebbleAccountToken))
+		h.httpError(w, span, "Failed to retrieve user", err, http.StatusInternalServerError)
 		return
 	}
-
-	if found && user.TodoistAccessToken != nil && user.TodoistAccessToken.Valid() {
-		h.logger.Info("User already authenticated", zap.String("pebbleAccountToken", pebbleAccountToken))
-		data["status"] = "success"
+	if !found {
+		h.logger.Warn("User not found for Pebble account token", zap.String("pebbleAccountToken", pebbleAccountToken))
+		w.WriteHeader(http.StatusUnauthorized)
+		return
 	}
-
-	h.renderConfigPage(w, data, http.StatusOK)
+	if user.PebbleTimelineToken != pebbleTimelineToken {
+		h.logger.Warn("Pebble Timeline Token mismatch", zap.String("pebbleAccountToken", pebbleAccountToken))
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	// Check if a Todoist access token is available
+	if user.TodoistAccessToken == nil || user.TodoistAccessToken.AccessToken == "" {
+		h.logger.Warn("Todoist access token is missing for user", zap.String("pebbleAccountToken", pebbleAccountToken))
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	// Respond with user data
+	w.Header().Set("Content-Type", "application/json")
+	response := map[string]interface{}{
+		"todoistUserID": user.TodoistUserID,
+		"timezone":      user.Timezone,
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		h.logger.Error("Failed to encode user response", zap.Error(err))
+		h.httpError(w, span, "Failed to encode user response", err, http.StatusInternalServerError)
+		return
+	}
 }
 
 // HandleTodoistLogin initiates the OAuth2 flow with Todoist.
@@ -134,12 +139,11 @@ func (h *HttpHandlers) HandleTodoistLogin(w http.ResponseWriter, r *http.Request
 	_, span := h.Tracer.Start(r.Context(), "HandleTodoistLogin")
 	defer span.End()
 
-	pebbleAccountToken := r.URL.Query().Get("pebble_account_token")
-	pebbleTimelineToken := r.URL.Query().Get("pebble_timeline_token")
-
-	if pebbleAccountToken == "" || pebbleTimelineToken == "" {
-		h.logger.Warn("Missing Pebble tokens in login request")
-		h.httpError(w, span, "Missing Pebble account or timeline token", nil, http.StatusBadRequest)
+	pebbleAccountToken, pebbleTimelineToken, err := getTokensFromHeader(r)
+	if err != nil {
+		h.logger.Warn("Missing or invalid Authorization header", zap.Error(err))
+		span.RecordError(err)
+		h.httpError(w, span, "Unauthorized", err, http.StatusUnauthorized)
 		return
 	}
 
@@ -403,15 +407,6 @@ func (h *HttpHandlers) clearOAuthCookies(w http.ResponseWriter, r *http.Request)
 	h.setCookie(w, r, oauthPebbleTimelineTokenCookieName, "", -1)
 }
 
-// renderConfigPage renders the config.html template with the given data and status code.
-func (h *HttpHandlers) renderConfigPage(w http.ResponseWriter, data map[string]string, statusCode int) {
-	w.WriteHeader(statusCode)
-	if err := h.htmlManager.Render(w, "config.html", data); err != nil {
-		h.logger.Error("Failed to render config page", zap.Error(err), zap.Any("data", data))
-		http.Error(w, "Failed to render page", http.StatusInternalServerError)
-	}
-}
-
 // redirectWithError redirects the user to the Pebble config page with an error message.
 func (h *HttpHandlers) redirectWithError(w http.ResponseWriter, r *http.Request, message string) {
 	h.logger.Warn("Redirecting with error", zap.String("message", message))
@@ -453,4 +448,33 @@ func generateOAuthState() (string, error) {
 		return "", fmt.Errorf("failed to read random bytes for state: %w", err)
 	}
 	return base64.URLEncoding.EncodeToString(b), nil
+}
+
+func getTokensFromHeader(r *http.Request) (string, string, error) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return "", "", fmt.Errorf("missing Authorization header")
+	}
+	parts := utils.SplitAndTrim(authHeader, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return "", "", fmt.Errorf("invalid Authorization header format")
+	}
+	// Base64 decode the token part
+	if len(parts[1]) == 0 {
+		return "", "", fmt.Errorf("missing token in Authorization header")
+	}
+	// Split the token into account and timeline tokens
+	if !utils.IsBase64(parts[1]) {
+		return "", "", fmt.Errorf("invalid token format in Authorization header, expected base64 encoded string")
+	}
+	// Convert base64 to string
+	decoded, err := base64.StdEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", "", fmt.Errorf("failed to decode base64 token: %w", err)
+	}
+	tokens := utils.SplitAndTrim(string(decoded), ":")
+	if len(tokens) != 2 {
+		return "", "", fmt.Errorf("invalid token format in Authorization header")
+	}
+	return tokens[0], tokens[1], nil
 }
