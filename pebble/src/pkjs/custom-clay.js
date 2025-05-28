@@ -36,12 +36,10 @@ module.exports = function (minified) {
                 alert('Your account has been deleted. You will be logged out.');
                 window.location.href = 'pebblejs://close';
             } else {
-                console.error('Error logging out: ' + xhr.statusText);
-                alert('Error deleting account: ' + xhr.statusText);
+                alert('Error in deletion request: ' + xhr.statusText);
             }
         };
         xhr.onerror = function () {
-            console.error('Error deleting account: ' + xhr.statusText);
             alert('Error deleting account: ' + xhr.statusText);
         };
         xhr.send();
@@ -49,13 +47,20 @@ module.exports = function (minified) {
 
     clayConfig.on(clayConfig.EVENTS.AFTER_BUILD, function() {
         var loginButton = clayConfig.getItemById('loginButton');
-        loginButton.on('click', loginClick);
-
-        var deleteButton = clayConfig.getItemById('deleteButton');
-        if (deleteButton) {
-            deleteButton.on('click', deleteClick);
+        if (!loginButton) {
+            console.warn('Login button not found in the configuration.');
         } else {
-            console.warn('Delete button not found in the configuration.');
+            loginButton.on('click', loginClick);
         }
+        
+        var deleteButton = clayConfig.getItemById('deleteButton');
+        if (!deleteButton) {
+            console.warn('Delete button not found in the configuration.');
+        } else {
+            deleteButton.on('click', deleteClick);
+            deleteButton.style.backgroundColor = '#ff0000'; // Set delete button color to red
+            deleteButton.style.color = '#ffffff'; // Set delete button text color to white
+        }
+
     });
 };
