@@ -85,6 +85,18 @@ func (s *InMemoryTokenStore) DeleteTokensByTodoistUserID(ctx context.Context, id
 	return nil
 }
 
+func (s *InMemoryTokenStore) DeleteTokensByPebbleAccount(ctx context.Context, pebbleAccountToken string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, found := s.tokensByPebbleAcc[pebbleAccountToken]; !found {
+		s.logger.Info("No tokens found to delete for pebbleAccountToken", zap.String("pebbleAccountToken", pebbleAccountToken))
+		return nil
+	}
+	delete(s.tokensByPebbleAcc, pebbleAccountToken)
+	s.logger.Info("Successfully deleted tokens by pebbleAccountToken", zap.String("pebbleAccountToken", pebbleAccountToken))
+	return nil
+}
+
 func (s *InMemoryTokenStore) Close() error {
 	s.logger.Info("Closing InMemoryTokenStore (no-op)")
 	return nil

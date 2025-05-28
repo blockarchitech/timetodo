@@ -133,6 +133,44 @@ func (h *HttpHandlers) HandleMe(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *HttpHandlers) HandleDeleteMe(w http.ResponseWriter, r *http.Request) {
+	ctx, span := h.Tracer.Start(r.Context(), "HandleDeleteMe")
+	defer span.End()
+
+	// Check for Authorization header
+	pebbleAccountToken, _, err := getTokensFromHeader(r)
+	if err != nil {
+		h.logger.Warn("Missing or invalid Authorization header", zap.Error(err))
+		span.RecordError(err)
+		h.httpError(w, span, "Unauthorized", err, http.StatusUnauthorized)
+		return
+	}
+
+	// User exists sanity check
+	_, found, err := h.tokenStore.GetTokensByPebbleAccount(ctx, pebbleAccountToken)
+	if err != nil {
+		h.logger.Error("Failed to retrieve user tokens", zap.Error(err), zap.String("pebbleAccountToken", pebbleAccountToken))
+		h.httpError(w, span, "Failed to retrieve user", err, http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		h.logger.Warn("User not found for Pebble account token", zap.String("pebbleAccountToken", pebbleAccountToken))
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	// Delete user tokens from storage
+	if err := h.tokenStore.DeleteTokensByPebbleAccount(ctx, pebbleAccountToken); err != nil {
+		h.logger.Error("Failed to delete user tokens", zap.Error(err), zap.String("pebbleAccountToken", pebbleAccountToken))
+		h.httpError(w, span, "Failed to delete user", err, http.StatusInternalServerError)
+		return
+	}
+
+	h.clearOAuthCookies(w, r)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // HandleTodoistLogin initiates the OAuth2 flow with Todoist.
 // It generates a state, sets cookies, and redirects to Todoist.
 func (h *HttpHandlers) HandleTodoistLogin(w http.ResponseWriter, r *http.Request) {

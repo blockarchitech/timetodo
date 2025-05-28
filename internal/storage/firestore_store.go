@@ -130,6 +130,20 @@ func (s *FirestoreTokenStore) DeleteTokensByTodoistUserID(ctx context.Context, i
 	return nil
 }
 
+func (s *FirestoreTokenStore) DeleteTokensByPebbleAccount(ctx context.Context, pebbleAccountToken string) error {
+	_, err := s.client.Collection(s.collectionName).Doc(pebbleAccountToken).Delete(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			s.logger.Info("No tokens found to delete for pebbleAccountToken", zap.String("pebbleAccountToken", pebbleAccountToken))
+			return nil
+		}
+		s.logger.Error("Failed to delete tokens from Firestore", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Error(err))
+		return fmt.Errorf("failed to delete document: %w", err)
+	}
+	s.logger.Info("Successfully deleted tokens for pebbleAccountToken", zap.String("pebbleAccountToken", pebbleAccountToken))
+	return nil
+}
+
 func (s *FirestoreTokenStore) Close() error {
 	return s.client.Close()
 }

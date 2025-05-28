@@ -175,6 +175,7 @@ func registerHooks(
 ) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/me", handlers.HandleMe)
+	mux.HandleFunc("DELETE /api/v1/me", handlers.HandleDeleteMe)
 	mux.HandleFunc("POST /api/v1/todoist", handlers.HandleTodoistWebhook)
 
 	mux.HandleFunc("GET /auth/login", handlers.HandleTodoistLogin)

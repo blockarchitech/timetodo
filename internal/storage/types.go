@@ -40,4 +40,5 @@ type TokenStore interface {
 	GetTokensByTodoistUserID(ctx context.Context, todoistUserID int64) (User, bool, error)
 	Close() error
 	DeleteTokensByTodoistUserID(ctx context.Context, id int64) error
+	DeleteTokensByPebbleAccount(ctx context.Context, pebbleAccountToken string) error
 }
