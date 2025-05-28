@@ -139,7 +139,7 @@ func (h *HttpHandlers) HandleTodoistLogin(w http.ResponseWriter, r *http.Request
 	_, span := h.Tracer.Start(r.Context(), "HandleTodoistLogin")
 	defer span.End()
 
-	pebbleAccountToken, pebbleTimelineToken, err := getTokensFromHeader(r)
+	pebbleAccountToken, pebbleTimelineToken, err := getTokensFromQuery(r)
 	if err != nil {
 		h.logger.Warn("Missing or invalid Authorization header", zap.Error(err))
 		span.RecordError(err)
@@ -463,12 +463,30 @@ func getTokensFromHeader(r *http.Request) (string, string, error) {
 	if len(parts[1]) == 0 {
 		return "", "", fmt.Errorf("missing token in Authorization header")
 	}
+
+	return getTokens(parts[1])
+}
+
+func getTokensFromQuery(r *http.Request) (string, string, error) {
+	base := r.URL.Query().Get("token")
+	if base == "" {
+		return "", "", fmt.Errorf("missing token query parameter")
+	}
 	// Split the token into account and timeline tokens
-	if !utils.IsBase64(parts[1]) {
+	if !utils.IsBase64(base) {
+		return "", "", fmt.Errorf("invalid token format in query parameter, expected base64 encoded string")
+	}
+
+	return getTokens(base)
+}
+
+func getTokens(b string) (string, string, error) {
+	// Split the token into account and timeline tokens
+	if !utils.IsBase64(b) {
 		return "", "", fmt.Errorf("invalid token format in Authorization header, expected base64 encoded string")
 	}
 	// Convert base64 to string
-	decoded, err := base64.StdEncoding.DecodeString(parts[1])
+	decoded, err := base64.StdEncoding.DecodeString(b)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to decode base64 token: %w", err)
 	}

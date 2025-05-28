@@ -3,17 +3,27 @@ var loggedOutConfig = require('./config-loggedout.json');
 var customClay = require('./custom-clay.js');
 
 var Clay = require('pebble-clay');
-var clay = new Clay([], customClay, { autoHandleEvents: false });
-
+// var clay = new Clay(loggedOutConfig, customClay, { autoHandleEvents: false, userData: {
+//     authorization: auth_header,
+//     timeline_token: timeline_token,
+//     account_token: account_token
+// } });
+var clay = new Clay(loggedOutConfig, customClay, { autoHandleEvents: false, userData: {
+    abc: '123',
+} });
 Pebble.addEventListener('showConfiguration', function (e) {
     Pebble.getTimelineToken(function (timeline_token) {
-        // make http request to https://timetodo-282379823777.us-central1.run.app/api/v1/me, with an Authorization header that is Bearer btoa(<acct_token> + ':' + <timeline_token>)
         var account_token = Pebble.getAccountToken();
-        var auth_header = 'Bearer ' + btoa(account_token + ':' + timeline_token);
+        var token = btoa(account_token + ':' + timeline_token);
+        var auth_header = 'Bearer ' + token;
 
-        clay.options.userData = {
-            authorization: auth_header
+        var userData = {
+            token: token
         };
+
+        clay.meta.userData = userData;
+
+        
 
         var xhr = new XMLHttpRequest();
         xhr.open('GET', 'https://timetodo-282379823777.us-central1.run.app/api/v1/me', true);
@@ -21,15 +31,15 @@ Pebble.addEventListener('showConfiguration', function (e) {
         xhr.onload = function () {
             if (xhr.status === 200) {
                 // User is logged in, show logged-in config
-                clay.config = loggedInConfig;                
+                clay.config = loggedInConfig;   
+                console.log('User data fetched successfully:', JSON.stringify(xhr.responseText));             
                 Pebble.openURL(clay.generateUrl());
             } else if (xhr.status === 401) {
                 // User is not logged in, show not-logged-in config
-                clay.config = loggedOutConfig;
+                console.warn('User is not logged in, showing logged-out config');
                 Pebble.openURL(clay.generateUrl());
             } else {
                 console.error('Error fetching user data: ' + xhr.statusText);
-                clay.config = loggedOutConfig;
                 Pebble.openURL(clay.generateUrl());
             }
         };
