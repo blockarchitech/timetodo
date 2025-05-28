@@ -35,8 +35,6 @@ Pebble.addEventListener('showConfiguration', function (e) {
 
         clay.meta.userData = userData;
 
-        
-
         var xhr = new XMLHttpRequest();
         xhr.open('GET', 'https://timetodo-282379823777.us-central1.run.app/api/v1/me', true);
         xhr.setRequestHeader('Authorization', auth_header);
@@ -44,16 +42,13 @@ Pebble.addEventListener('showConfiguration', function (e) {
             if (xhr.status === 200) {
                 // User is logged in, show logged-in config
                 clay.config = loggedInConfig;   
-                console.log('User data fetched successfully:', JSON.stringify(xhr.responseText));             
                 Pebble.openURL(clay.generateUrl());
             } else if (xhr.status === 401) {
                 // User is not logged in, show not-logged-in config
                 clay.config = loggedOutConfig;
-                console.warn('User is not logged in, showing logged-out config');
                 Pebble.openURL(clay.generateUrl());
             } else {
                 clay.config = loggedOutConfig;
-                console.error('Error fetching user data: ' + xhr.statusText);
                 Pebble.openURL(clay.generateUrl());
             }
         };
@@ -76,6 +71,19 @@ Pebble.addEventListener('webviewclosed', function (e) {
 
     // Get the keys and values from each config item
     var dict = clay.getSettings(e.response);
+
+    var response = JSON.parse(e.response);
+    if (response.status === 'success') {
+        Pebble.showSimpleNotificationOnPebble('TimeToDo', 'Login success! Your new Todoist tasks will be synced to your timeline.');
+    }
+
+    Pebble.sendAppMessage({
+        Close: 1,
+    }, function () {
+        // ok
+    }, function (error) {
+        // oh no, anyway
+    });
 
 
 });

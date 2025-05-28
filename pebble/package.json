@@ -10,7 +10,7 @@
     "pebble-clay": "^1.0.4"
   },
   "pebble": {
-    "displayName": "timetodo",
+    "displayName": "TimeToDo",
     "uuid": "2e72e379-70f6-43a9-828c-07d30d0fdf6d",
     "sdkVersion": "3",
     "enableMultiJS": true,
@@ -18,7 +18,8 @@
       "aplite",
       "basalt",
       "chalk",
-      "diorite"
+      "diorite",
+      "emery"
     ],
     "watchapp": {
       "watchface": false,

@@ -45,6 +45,7 @@ const (
 	oauthPebbleTimelineTokenCookieName = "timetodo_oauth_p_timeline_token"
 	oauthCookieMaxAge                  = 300 // 5 minutes
 	pebbleCloseSuccessURL              = "pebblejs://close#{\"status\":\"success\"}"
+	pebbleCloseLogoutURL               = "pebblejs://close#{\"status\":\"logout\"}"
 )
 
 // HttpHandlers holds application-wide state and dependencies.
@@ -227,7 +228,7 @@ func (h *HttpHandlers) HandleDeletePage(w http.ResponseWriter, r *http.Request) 
 	</script>
 </body>
 </html>
-`, pebbleAccountToken, pebbleTimelineToken, pebbleCloseSuccessURL)
+`, pebbleAccountToken, pebbleTimelineToken, pebbleCloseLogoutURL)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
