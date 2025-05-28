@@ -483,7 +483,7 @@ func (h *HttpHandlers) handleInvalidPebbleToken(ctx context.Context, userID int6
 func createPebblePin(userID int64, taskData todoist.TaskEventData, dueTime time.Time) pebble.Pin {
 	return pebble.Pin{
 		ID:   fmt.Sprintf("todoist-%d-%s", userID, taskData.ID),
-		Time: dueTime.Format(time.RFC3339),
+		Time: dueTime.UTC().Format(time.RFC3339),
 		Layout: pebble.PinLayout{
 			Type:     "genericPin",
 			Title:    taskData.Content,
