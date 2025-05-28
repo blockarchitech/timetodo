@@ -39,7 +39,7 @@ type DueDate struct {
 type TaskEventData struct {
 	ID          string   `json:"id"`
 	Content     string   `json:"content"`
-	Description string   `json:"description,omitempty"`
+	Description string   `json:"description"`
 	Due         *DueDate `json:"due,omitempty"`
 	Priority    int      `json:"priority"`
 	ProjectID   string   `json:"project_id,omitempty"`
