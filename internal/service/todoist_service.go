@@ -131,7 +131,7 @@ func (s *TodoistService) RevokeToken(ctx context.Context, accessToken string) er
 
 	reqCtx, cancel := context.WithTimeout(ctx, s.apiTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, todoistAPIBaseURL+"/access_tokens", nil)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodDelete, todoistAPIBaseURL+"/access_tokens", nil)
 	// set query parameters for revoking token
 	if err != nil {
 		s.logger.Error("Failed to create request to revoke Todoist token", zap.Error(err))
