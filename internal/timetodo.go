@@ -149,8 +149,8 @@ func newPebbleTimelineService(cfg *config.Config, tracer oteltrace.Tracer, logge
 }
 
 // newTodoistService creates a new TodoistService.
-func newTodoistService(tracer oteltrace.Tracer, logger *zap.Logger) *service.TodoistService {
-	return service.NewTodoistService(tracer, logger)
+func newTodoistService(tracer oteltrace.Tracer, logger *zap.Logger, config *config.Config) *service.TodoistService {
+	return service.NewTodoistService(tracer, logger, config)
 }
 
 // newHttpHandlers creates the HTTP handlers.

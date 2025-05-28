@@ -147,7 +147,7 @@ func (h *HttpHandlers) HandleDeleteMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// User exists sanity check
-	_, found, err := h.tokenStore.GetTokensByPebbleAccount(ctx, pebbleAccountToken)
+	user, found, err := h.tokenStore.GetTokensByPebbleAccount(ctx, pebbleAccountToken)
 	if err != nil {
 		h.logger.Error("Failed to retrieve user tokens", zap.Error(err), zap.String("pebbleAccountToken", pebbleAccountToken))
 		h.httpError(w, span, "Failed to retrieve user", err, http.StatusInternalServerError)
@@ -156,6 +156,13 @@ func (h *HttpHandlers) HandleDeleteMe(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		h.logger.Warn("User not found for Pebble account token", zap.String("pebbleAccountToken", pebbleAccountToken))
 		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	// Send token revocation request to Todoist
+	if err := h.todoistService.RevokeToken(ctx, user.TodoistAccessToken.AccessToken); err != nil {
+		h.logger.Error("Failed to revoke Todoist access token", zap.Error(err), zap.Int64("todoistUserID", user.TodoistUserID))
+		h.httpError(w, span, "Failed to revoke Todoist token", err, http.StatusInternalServerError)
 		return
 	}
 

@@ -48,16 +48,17 @@ Pebble.addEventListener('showConfiguration', function (e) {
                 Pebble.openURL(clay.generateUrl());
             } else if (xhr.status === 401) {
                 // User is not logged in, show not-logged-in config
+                clay.config = loggedOutConfig;
                 console.warn('User is not logged in, showing logged-out config');
                 Pebble.openURL(clay.generateUrl());
             } else {
+                clay.config = loggedOutConfig;
                 console.error('Error fetching user data: ' + xhr.statusText);
                 Pebble.openURL(clay.generateUrl());
             }
         };
         xhr.onerror = function () {
             console.error('Error fetching user data: ' + xhr.statusText);
-            // Fallback to not-logged-in config in case of error
             clay.config = loggedOutConfig;
             Pebble.openURL(clay.generateUrl());
         };

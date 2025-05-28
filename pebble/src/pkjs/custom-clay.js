@@ -23,6 +23,9 @@ module.exports = function (minified) {
     var token = clayConfig.meta.userData.token || '';
 
     function loginClick() {
+        var loginButton = clayConfig.getItemById('loginButton');
+        loginButton.disable();
+        loginButton.set('Please wait...');
         window.location.href = 'https://timetodo-282379823777.us-central1.run.app/auth/login?token=' + encodeURIComponent(token);
     }
 

@@ -30,6 +30,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+
+	"blockarchitech.com/timetodo/internal/config"
 )
 
 const todoistAPIBaseURL = "https://api.todoist.com/api/v1"
@@ -40,10 +42,11 @@ type TodoistService struct {
 	tracer     trace.Tracer
 	logger     *zap.Logger
 	apiTimeout time.Duration
+	config     *config.Config
 }
 
 // NewTodoistService creates a new TodoistService.
-func NewTodoistService(tracer trace.Tracer, logger *zap.Logger) *TodoistService {
+func NewTodoistService(tracer trace.Tracer, logger *zap.Logger, config *config.Config) *TodoistService {
 	client := &http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport,
 			otelhttp.WithTracerProvider(otel.GetTracerProvider()),
@@ -55,6 +58,7 @@ func NewTodoistService(tracer trace.Tracer, logger *zap.Logger) *TodoistService 
 		tracer:     tracer,
 		logger:     logger.Named("todoist_service"),
 		apiTimeout: 15 * time.Second,
+		config:     config,
 	}
 }
 
@@ -120,4 +124,40 @@ func (s *TodoistService) GetUser(ctx context.Context, accessToken string) (Todoi
 	}
 
 	return userResp, nil
+}
+
+func (s *TodoistService) RevokeToken(ctx context.Context, accessToken string) error {
+	s.logger.Debug("Revoking Todoist access token")
+
+	reqCtx, cancel := context.WithTimeout(ctx, s.apiTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, todoistAPIBaseURL+"/access_tokens", nil)
+	// set query parameters for revoking token
+	if err != nil {
+		s.logger.Error("Failed to create request to revoke Todoist token", zap.Error(err))
+		return fmt.Errorf("failed to create revoke token request: %w", err)
+	}
+
+	q := req.URL.Query()
+	q.Set("access_token", accessToken)
+	q.Set("client_id", s.config.TodoistClientID)
+	q.Set("client_secret", s.config.TodoistClientSecret)
+	req.URL.RawQuery = q.Encode()
+	resp, err := s.client.Do(req)
+	if err != nil {
+		s.logger.Error("Failed to send revoke token request to Todoist", zap.Error(err))
+		return fmt.Errorf("failed to send revoke token request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		err := fmt.Errorf("Todoist API returned non-OK status %d: %s", resp.StatusCode, string(bodyBytes))
+		s.logger.Error("Todoist API error while revoking token",
+			zap.Int("statusCode", resp.StatusCode),
+			zap.ByteString("responseBody", bodyBytes),
+		)
+		return err
+	}
+	s.logger.Info("Successfully revoked Todoist access token")
+	return nil
 }
