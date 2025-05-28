@@ -171,6 +171,67 @@ func (h *HttpHandlers) HandleDeleteMe(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// HandleDeletePage serves a simple HTML page with a button to delete the user's account.
+func (h *HttpHandlers) HandleDeletePage(w http.ResponseWriter, r *http.Request) {
+	// This handler is for the delete page, which is literally just a button that sends a fetch() request to the /api/v1/me endpoint.
+	// This is to avoid CORS issues with the Pebble app.
+	_, span := h.Tracer.Start(r.Context(), "HandleDeletePage")
+	defer span.End()
+	// Check for Authorization header
+	pebbleAccountToken, pebbleTimelineToken, err := getTokensFromQuery(r)
+	if err != nil {
+		h.logger.Warn("Missing or invalid Authorization header", zap.Error(err))
+		span.RecordError(err)
+		h.httpError(w, span, "Unauthorized", err, http.StatusUnauthorized)
+		return
+	}
+	// construct HTML page
+	html := fmt.Sprintf(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Delete Account</title>
+	</head>
+<body>
+	<h1>Delete Account</h1>
+	<p>Are you sure you want to delete your account? This action cannot be undone.</p>
+	<button id="delete-button">Delete Account</button>
+	<script>
+		document.getElementById('delete-button').addEventListener('click', function() {
+			fetch('/api/v1/me', {
+				method: 'DELETE',
+				headers: {
+					'Authorization': 'Bearer ' + '%s' + ' ' + '%s'
+				}
+			}).then(response => {
+				if (response.ok) {
+					alert('Your account has been deleted successfully.');
+					window.location.href = '%s';
+				} else {
+					alert('Failed to delete account. Please try again later.');
+				}
+			}).catch(error => {
+				console.error('Error deleting account:', error);
+				alert('An error occurred while deleting your account. Please try again later.');
+			});
+		});
+	</script>
+</body>
+</html>
+`, pebbleAccountToken, pebbleTimelineToken, pebbleCloseSuccessURL)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write([]byte(html))
+	if err != nil {
+		h.logger.Error("Failed to write HTML response", zap.Error(err))
+		h.httpError(w, span, "Failed to write response", err, http.StatusInternalServerError)
+		return
+	}
+}
+
 // HandleTodoistLogin initiates the OAuth2 flow with Todoist.
 // It generates a state, sets cookies, and redirects to Todoist.
 func (h *HttpHandlers) HandleTodoistLogin(w http.ResponseWriter, r *http.Request) {
@@ -488,6 +549,7 @@ func generateOAuthState() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
+// getTokensFromHeader retrieves Pebble account and timeline tokens from the Authorization header.
 func getTokensFromHeader(r *http.Request) (string, string, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
@@ -505,6 +567,7 @@ func getTokensFromHeader(r *http.Request) (string, string, error) {
 	return getTokens(parts[1])
 }
 
+// getTokensFromQuery retrieves Pebble account and timeline tokens from the query parameters.
 func getTokensFromQuery(r *http.Request) (string, string, error) {
 	base := r.URL.Query().Get("token")
 	if base == "" {
@@ -518,6 +581,7 @@ func getTokensFromQuery(r *http.Request) (string, string, error) {
 	return getTokens(base)
 }
 
+// getTokens splits a base64 encoded token into account and timeline tokens.
 func getTokens(b string) (string, string, error) {
 	// Split the token into account and timeline tokens
 	if !utils.IsBase64(b) {

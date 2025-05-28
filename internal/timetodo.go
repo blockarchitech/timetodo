@@ -180,6 +180,7 @@ func registerHooks(
 
 	mux.HandleFunc("GET /auth/login", handlers.HandleTodoistLogin)
 	mux.HandleFunc("GET /auth/callback", handlers.HandleTodoistCallback)
+	mux.HandleFunc("GET /auth/delete", handlers.HandleDeletePage)
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

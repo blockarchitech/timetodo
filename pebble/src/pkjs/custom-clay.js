@@ -23,43 +23,26 @@ module.exports = function (minified) {
     var token = clayConfig.meta.userData.token || '';
 
     function loginClick() {
-        var loginUrl = 'https://timetodo-282379823777.us-central1.run.app/auth/login?token=' + encodeURIComponent(token);
-        window.location.href = loginUrl;
+        window.location.href = 'https://timetodo-282379823777.us-central1.run.app/auth/login?token=' + encodeURIComponent(token);
     }
 
     function deleteClick() {
-        var xhr = new XMLHttpRequest();
-        xhr.open('DELETE', 'https://timetodo-282379823777.us-central1.run.app/api/v1/me', true);
-        xhr.setRequestHeader('Authorization', 'Bearer ' + token);
-        xhr.onload = function () {
-            if (xhr.status === 204) {
-                alert('Your account has been deleted. You will be logged out.');
-                window.location.href = 'pebblejs://close';
-            } else {
-                alert('Error in deletion request: ' + xhr.statusText);
-            }
-        };
-        xhr.onerror = function () {
-            alert('Error deleting account: ' + xhr.statusText);
-        };
-        xhr.send();
+        window.location.href = 'https://timetodo-282379823777.us-central1.run.app/auth/delete?token=' + encodeURIComponent(token);
     }
 
-    clayConfig.on(clayConfig.EVENTS.AFTER_BUILD, function() {
+    clayConfig.on(clayConfig.EVENTS.AFTER_BUILD, function () {
         var loginButton = clayConfig.getItemById('loginButton');
         if (!loginButton) {
             console.warn('Login button not found in the configuration.');
         } else {
             loginButton.on('click', loginClick);
         }
-        
+
         var deleteButton = clayConfig.getItemById('deleteButton');
         if (!deleteButton) {
             console.warn('Delete button not found in the configuration.');
         } else {
             deleteButton.on('click', deleteClick);
-            deleteButton.style.backgroundColor = '#ff0000'; // Set delete button color to red
-            deleteButton.style.color = '#ffffff'; // Set delete button text color to white
         }
 
     });
