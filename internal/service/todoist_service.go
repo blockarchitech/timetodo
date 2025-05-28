@@ -149,9 +149,14 @@ func (s *TodoistService) RevokeToken(ctx context.Context, accessToken string) er
 		return fmt.Errorf("failed to send revoke token request: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+
+	// Todoist returns either 204 No Content or 403 Forbidden for a successful integration removal.
+	// I'm assuming this is a mistake in their API docs, or some strange edge case where the token is already revoked.
+	// It may also be that the token is expired, however, Todoist does not provide an expiration date in the exchange nor mention it in their API docs.
+	// None of that matters, though, as it removes the integration from their account and Todoist stops sending us webhooks.
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusForbidden {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		err := fmt.Errorf("Todoist API returned non-OK status %d: %s", resp.StatusCode, string(bodyBytes))
+		err := fmt.Errorf("todoist API returned non-OK status %d: %s", resp.StatusCode, string(bodyBytes))
 		s.logger.Error("Todoist API error while revoking token",
 			zap.Int("statusCode", resp.StatusCode),
 			zap.ByteString("responseBody", bodyBytes),
