@@ -16,7 +16,13 @@
 
 package utils
 
-import "strings"
+import (
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+	"net/http"
+	"strings"
+)
 
 // SplitAndTrim splits a string by a separator and trims whitespace from each part.
 func SplitAndTrim(s string, sep string) []string {
@@ -42,4 +48,14 @@ func IsBase64(s string) bool {
 	}
 
 	return true
+}
+
+// HttpError logs an error, updates the span, and sends an HTTP error response.
+func HttpError(w http.ResponseWriter, span trace.Span, l *zap.Logger, message string, err error, statusCode int) {
+	l.Error(message, zap.Error(err))
+	if span != nil {
+		span.SetStatus(codes.Error, message)
+		span.RecordError(err)
+	}
+	http.Error(w, message, statusCode)
 }

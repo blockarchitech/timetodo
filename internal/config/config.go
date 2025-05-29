@@ -23,6 +23,15 @@ import (
 	"golang.org/x/oauth2"
 )
 
+const (
+	OauthStateCookieName               = "timetodo_oauth_state"
+	OauthPebbleAccountTokenCookieName  = "timetodo_oauth_p_acc_token"
+	OauthPebbleTimelineTokenCookieName = "timetodo_oauth_p_timeline_token"
+	OauthCookieMaxAge                  = 300 // 5 minutes
+	PebbleCloseSuccessURL              = "pebblejs://close#{\"status\":\"success\"}"
+	PebbleCloseLogoutURL               = "pebblejs://close#{\"status\":\"logout\"}"
+)
+
 // Config holds the application configuration values.
 type Config struct {
 	Port                 string

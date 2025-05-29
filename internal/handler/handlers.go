@@ -20,12 +20,9 @@ import (
 	"blockarchitech.com/timetodo/internal/config"
 	"blockarchitech.com/timetodo/internal/service"
 	"blockarchitech.com/timetodo/internal/storage"
-	"blockarchitech.com/timetodo/internal/types/pebble"
 	"blockarchitech.com/timetodo/internal/types/todoist"
 	"blockarchitech.com/timetodo/internal/utils"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"go.opentelemetry.io/otel/attribute"
@@ -38,15 +35,6 @@ import (
 	"time"
 )
 
-const (
-	oauthStateCookieName               = "timetodo_oauth_state"
-	oauthPebbleAccountTokenCookieName  = "timetodo_oauth_p_acc_token"
-	oauthPebbleTimelineTokenCookieName = "timetodo_oauth_p_timeline_token"
-	oauthCookieMaxAge                  = 300 // 5 minutes
-	pebbleCloseSuccessURL              = "pebblejs://close#{\"status\":\"success\"}"
-	pebbleCloseLogoutURL               = "pebblejs://close#{\"status\":\"logout\"}"
-)
-
 // HttpHandlers holds application-wide state and dependencies.
 type HttpHandlers struct {
 	logger                *zap.Logger
@@ -56,7 +44,9 @@ type HttpHandlers struct {
 	pebbleTimelineService *service.PebbleTimelineService
 	todoistService        *service.TodoistService
 	Tracer                trace.Tracer
-	Utils                 *utils.TodoistUtils
+	TodoistUtils          *utils.TodoistUtils
+	PebbleUtils           *utils.PebbleUtils
+	AuthUtils             *utils.AuthUtils
 }
 
 // NewHttpHandlers creates a new HttpHandlers instance.
@@ -77,7 +67,9 @@ func NewHttpHandlers(
 		pebbleTimelineService: pebbleService,
 		todoistService:        todoistService,
 		Tracer:                tracer,
-		Utils:                 utils.NewTodoistUtils(cfg, logger.Named("todoist_utils")),
+		TodoistUtils:          utils.NewTodoistUtils(cfg, logger.Named("todoist_utils")),
+		PebbleUtils:           utils.NewPebbleUtils(tokenStore, logger.Named("pebble_utils")),
+		AuthUtils:             utils.NewAuthUtils(),
 	}
 }
 
@@ -89,11 +81,11 @@ func (h *HttpHandlers) HandleMe(w http.ResponseWriter, r *http.Request) {
 	defer span.End()
 
 	// Check for Authorization header
-	pebbleAccountToken, pebbleTimelineToken, err := getTokensFromHeader(r)
+	pebbleAccountToken, pebbleTimelineToken, err := h.AuthUtils.GetTokensFromHeader(r)
 	if err != nil {
 		h.logger.Warn("Missing or invalid Authorization header", zap.Error(err))
 		span.RecordError(err)
-		h.httpError(w, span, "Unauthorized", err, http.StatusUnauthorized)
+		utils.HttpError(w, span, h.logger, "Unauthorized", err, http.StatusUnauthorized)
 		return
 	}
 
@@ -101,7 +93,7 @@ func (h *HttpHandlers) HandleMe(w http.ResponseWriter, r *http.Request) {
 	user, found, err := h.tokenStore.GetTokensByPebbleAccount(ctx, pebbleAccountToken)
 	if err != nil {
 		h.logger.Error("Failed to retrieve user tokens", zap.Error(err), zap.String("pebbleAccountToken", pebbleAccountToken))
-		h.httpError(w, span, "Failed to retrieve user", err, http.StatusInternalServerError)
+		utils.HttpError(w, span, h.logger, "Failed to retrieve user", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -128,7 +120,7 @@ func (h *HttpHandlers) HandleMe(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		h.logger.Error("Failed to encode user response", zap.Error(err))
-		h.httpError(w, span, "Failed to encode user response", err, http.StatusInternalServerError)
+		utils.HttpError(w, span, h.logger, "Failed to encode user response", err, http.StatusInternalServerError)
 		return
 	}
 }
@@ -138,11 +130,11 @@ func (h *HttpHandlers) HandleDeleteMe(w http.ResponseWriter, r *http.Request) {
 	defer span.End()
 
 	// Check for Authorization header
-	pebbleAccountToken, _, err := getTokensFromHeader(r)
+	pebbleAccountToken, _, err := h.AuthUtils.GetTokensFromHeader(r)
 	if err != nil {
 		h.logger.Warn("Missing or invalid Authorization header", zap.Error(err))
 		span.RecordError(err)
-		h.httpError(w, span, "Unauthorized", err, http.StatusUnauthorized)
+		utils.HttpError(w, span, h.logger, "Unauthorized", err, http.StatusUnauthorized)
 		return
 	}
 
@@ -150,7 +142,7 @@ func (h *HttpHandlers) HandleDeleteMe(w http.ResponseWriter, r *http.Request) {
 	user, found, err := h.tokenStore.GetTokensByPebbleAccount(ctx, pebbleAccountToken)
 	if err != nil {
 		h.logger.Error("Failed to retrieve user tokens", zap.Error(err), zap.String("pebbleAccountToken", pebbleAccountToken))
-		h.httpError(w, span, "Failed to retrieve user", err, http.StatusInternalServerError)
+		utils.HttpError(w, span, h.logger, "Failed to retrieve user", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -162,18 +154,18 @@ func (h *HttpHandlers) HandleDeleteMe(w http.ResponseWriter, r *http.Request) {
 	// Send token revocation request to Todoist
 	if err := h.todoistService.RevokeToken(ctx, user.TodoistAccessToken.AccessToken); err != nil {
 		h.logger.Error("Failed to revoke Todoist access token", zap.Error(err), zap.Int64("todoistUserID", user.TodoistUserID))
-		h.httpError(w, span, "Failed to revoke Todoist token", err, http.StatusInternalServerError)
+		utils.HttpError(w, span, h.logger, "Failed to revoke Todoist token", err, http.StatusInternalServerError)
 		return
 	}
 
 	// Delete user tokens from storage
 	if err := h.tokenStore.DeleteTokensByPebbleAccount(ctx, pebbleAccountToken); err != nil {
 		h.logger.Error("Failed to delete user tokens", zap.Error(err), zap.String("pebbleAccountToken", pebbleAccountToken))
-		h.httpError(w, span, "Failed to delete user", err, http.StatusInternalServerError)
+		utils.HttpError(w, span, h.logger, "Failed to delete user", err, http.StatusInternalServerError)
 		return
 	}
 
-	h.clearOAuthCookies(w, r)
+	h.AuthUtils.ClearOAuthCookies(w, r)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -185,11 +177,11 @@ func (h *HttpHandlers) HandleDeletePage(w http.ResponseWriter, r *http.Request) 
 	_, span := h.Tracer.Start(r.Context(), "HandleDeletePage")
 	defer span.End()
 	// Check for Authorization header
-	pebbleAccountToken, pebbleTimelineToken, err := getTokensFromQuery(r)
+	pebbleAccountToken, pebbleTimelineToken, err := h.AuthUtils.GetTokensFromQuery(r)
 	if err != nil {
 		h.logger.Warn("Missing or invalid Authorization header", zap.Error(err))
 		span.RecordError(err)
-		h.httpError(w, span, "Unauthorized", err, http.StatusUnauthorized)
+		utils.HttpError(w, span, h.logger, "Unauthorized", err, http.StatusUnauthorized)
 		return
 	}
 	// construct HTML page
@@ -227,14 +219,14 @@ func (h *HttpHandlers) HandleDeletePage(w http.ResponseWriter, r *http.Request) 
 	</script>
 </body>
 </html>
-`, pebbleAccountToken, pebbleTimelineToken, pebbleCloseLogoutURL)
+`, pebbleAccountToken, pebbleTimelineToken, config.PebbleCloseLogoutURL)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, err = w.Write([]byte(html))
 	if err != nil {
 		h.logger.Error("Failed to write HTML response", zap.Error(err))
-		h.httpError(w, span, "Failed to write response", err, http.StatusInternalServerError)
+		utils.HttpError(w, span, h.logger, "Failed to write response", err, http.StatusInternalServerError)
 		return
 	}
 }
@@ -245,23 +237,23 @@ func (h *HttpHandlers) HandleTodoistLogin(w http.ResponseWriter, r *http.Request
 	_, span := h.Tracer.Start(r.Context(), "HandleTodoistLogin")
 	defer span.End()
 
-	pebbleAccountToken, pebbleTimelineToken, err := getTokensFromQuery(r)
+	pebbleAccountToken, pebbleTimelineToken, err := h.AuthUtils.GetTokensFromQuery(r)
 	if err != nil {
 		h.logger.Warn("Missing or invalid Authorization header", zap.Error(err))
 		span.RecordError(err)
-		h.httpError(w, span, "Unauthorized", err, http.StatusUnauthorized)
+		utils.HttpError(w, span, h.logger, "Unauthorized", err, http.StatusUnauthorized)
 		return
 	}
 
-	state, err := generateOAuthState()
+	state, err := h.AuthUtils.GenerateOAuthState()
 	if err != nil {
-		h.httpError(w, span, "Failed to generate OAuth state", err, http.StatusInternalServerError)
+		utils.HttpError(w, span, h.logger, "Failed to generate OAuth state", err, http.StatusInternalServerError)
 		return
 	}
 
-	h.setCookie(w, r, oauthStateCookieName, state, oauthCookieMaxAge)
-	h.setCookie(w, r, oauthPebbleAccountTokenCookieName, pebbleAccountToken, oauthCookieMaxAge)
-	h.setCookie(w, r, oauthPebbleTimelineTokenCookieName, pebbleTimelineToken, oauthCookieMaxAge)
+	h.AuthUtils.SetCookie(w, r, config.OauthStateCookieName, state, config.OauthCookieMaxAge)
+	h.AuthUtils.SetCookie(w, r, config.OauthPebbleAccountTokenCookieName, pebbleAccountToken, config.OauthCookieMaxAge)
+	h.AuthUtils.SetCookie(w, r, config.OauthPebbleTimelineTokenCookieName, pebbleTimelineToken, config.OauthCookieMaxAge)
 
 	authURL := h.oauth2Config.AuthCodeURL(state)
 	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
@@ -282,7 +274,7 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Validate state cookie
-	stateCookie, err := r.Cookie(oauthStateCookieName)
+	stateCookie, err := r.Cookie(config.OauthStateCookieName)
 	if err != nil || r.URL.Query().Get("state") != stateCookie.Value {
 		h.logger.Warn("Invalid OAuth state or cookie not found", zap.Error(err))
 		http.Error(w, "Invalid state or cookie not found", http.StatusBadRequest)
@@ -308,7 +300,7 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Retrieve Pebble tokens from cookies
-	pebbleAccountToken, pebbleTimelineToken, err := h.getPebbleTokensFromCookies(r)
+	pebbleAccountToken, pebbleTimelineToken, err := h.AuthUtils.GetPebbleTokensFromCookies(r)
 	if err != nil {
 		h.logger.Error("Failed to retrieve Pebble tokens from cookies", zap.Error(err))
 		http.Error(w, "Failed to retrieve Pebble tokens", http.StatusInternalServerError)
@@ -333,7 +325,7 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Clear cookies
-	h.clearOAuthCookies(w, r)
+	h.AuthUtils.ClearOAuthCookies(w, r)
 
 	h.logger.Info("Successfully authenticated and stored tokens",
 		zap.String("pebbleAccountToken", pebbleAccountToken),
@@ -345,7 +337,7 @@ func (h *HttpHandlers) HandleTodoistCallback(w http.ResponseWriter, r *http.Requ
 	)
 
 	// Redirect to Pebble close with success
-	http.Redirect(w, r, pebbleCloseSuccessURL, http.StatusTemporaryRedirect)
+	http.Redirect(w, r, config.PebbleCloseSuccessURL, http.StatusTemporaryRedirect)
 }
 
 // HandleTodoistWebhook processes incoming webhooks from Todoist.
@@ -356,14 +348,14 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		h.httpError(w, span, "Failed to read webhook body", err, http.StatusInternalServerError)
+		utils.HttpError(w, span, h.logger, "Failed to read webhook body", err, http.StatusInternalServerError)
 		return
 	}
 	defer r.Body.Close()
 
 	// Verify signature
 	signature := r.Header.Get("X-Todoist-Hmac-SHA256")
-	if !h.Utils.VerifyTodoistSignature(signature, body) {
+	if !h.TodoistUtils.VerifyTodoistSignature(signature, body) {
 		h.logger.Warn("Invalid Todoist webhook signature")
 		span.SetStatus(codes.Error, "Invalid signature")
 		http.Error(w, "Invalid signature", http.StatusForbidden)
@@ -373,7 +365,7 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 	// Unmarshal payload
 	var payload todoist.WebhookPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
-		h.httpError(w, span, "Failed to unmarshal webhook payload", err, http.StatusBadRequest)
+		utils.HttpError(w, span, h.logger, "Failed to unmarshal webhook payload", err, http.StatusBadRequest)
 		return
 	}
 
@@ -410,8 +402,6 @@ func (h *HttpHandlers) HandleTodoistWebhook(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusOK) // Acknowledge webhook
 }
 
-// --- Helper Functions ---
-
 // processTaskEvent handles item:added and item:updated webhook events.
 func (h *HttpHandlers) processTaskEvent(ctx context.Context, span trace.Span, user storage.User, payload todoist.WebhookPayload) {
 	var taskData todoist.TaskEventData
@@ -429,7 +419,7 @@ func (h *HttpHandlers) processTaskEvent(ctx context.Context, span trace.Span, us
 	}
 
 	// Parse due date
-	dueTime, err := h.Utils.ParseTodoistDueDateTime(taskData.Due, user.Timezone)
+	dueTime, err := h.TodoistUtils.ParseTodoistDueDateTime(taskData.Due, user.Timezone)
 	if err != nil {
 		h.logger.Error("Failed to parse due date from webhook task", zap.Error(err), zap.Any("dueObject", taskData.Due))
 		span.RecordError(err)
@@ -437,7 +427,7 @@ func (h *HttpHandlers) processTaskEvent(ctx context.Context, span trace.Span, us
 	}
 
 	// Create and marshal pin
-	pin := createPebblePin(payload.UserID, taskData, dueTime)
+	pin := h.PebbleUtils.CreatePebblePin(payload.UserID, taskData, dueTime)
 	pinJSON, err := json.Marshal(pin)
 	if err != nil {
 		h.logger.Error("Failed to marshal Pebble pin for webhook task", zap.Error(err))
@@ -459,140 +449,11 @@ func (h *HttpHandlers) processTaskEvent(ctx context.Context, span trace.Span, us
 		span.RecordError(err)
 		// Handle 410 Gone: Token is invalid, delete the user account
 		if statusCode == http.StatusGone {
-			h.handleInvalidPebbleToken(ctx, payload.UserID)
+			h.PebbleUtils.HandleInvalidPebbleToken(ctx, payload.UserID)
 		}
 		return
 	}
 
 	h.logger.Info("Successfully pushed Pebble pin from webhook task", zap.String("pinID", pin.ID))
 	span.SetAttributes(attribute.String("app.pin_id_pushed", pin.ID))
-}
-
-// handleInvalidPebbleToken deletes user data when their Pebble token is invalid (410 Gone).
-func (h *HttpHandlers) handleInvalidPebbleToken(ctx context.Context, userID int64) {
-	h.logger.Warn("Pebble Timeline token is no longer valid, deleting user account", zap.Int64("todoistUserID", userID))
-	if err := h.tokenStore.DeleteTokensByTodoistUserID(ctx, userID); err != nil {
-		h.logger.Error("Failed to delete user tokens after 410", zap.Error(err), zap.Int64("todoistUserID", userID))
-	} else {
-		h.logger.Info("Successfully deleted user tokens after 410", zap.Int64("todoistUserID", userID))
-	}
-}
-
-// createPebblePin constructs a Pebble Pin object from task data.
-func createPebblePin(userID int64, taskData todoist.TaskEventData, dueTime time.Time) pebble.Pin {
-	return pebble.Pin{
-		ID:   fmt.Sprintf("todoist-%d-%s", userID, taskData.ID),
-		Time: dueTime.UTC().Format(time.RFC3339),
-		Layout: pebble.PinLayout{
-			Type:     "genericPin",
-			Title:    taskData.Content,
-			Body:     taskData.Description,
-			TinyIcon: "system://images/NOTIFICATION_FLAG",
-		},
-	}
-}
-
-// getPebbleTokensFromCookies retrieves Pebble account and timeline tokens from request cookies.
-func (h *HttpHandlers) getPebbleTokensFromCookies(r *http.Request) (string, string, error) {
-	pebbleAccountTokenCookie, errAcc := r.Cookie(oauthPebbleAccountTokenCookieName)
-	pebbleTimelineTokenCookie, errTime := r.Cookie(oauthPebbleTimelineTokenCookieName)
-
-	if errAcc != nil {
-		return "", "", fmt.Errorf("account token cookie error: %w", errAcc)
-	}
-	if errTime != nil {
-		return "", "", fmt.Errorf("timeline token cookie error: %w", errTime)
-	}
-
-	return pebbleAccountTokenCookie.Value, pebbleTimelineTokenCookie.Value, nil
-}
-
-// clearOAuthCookies removes OAuth-related cookies.
-func (h *HttpHandlers) clearOAuthCookies(w http.ResponseWriter, r *http.Request) {
-	h.setCookie(w, r, oauthStateCookieName, "", -1)
-	h.setCookie(w, r, oauthPebbleAccountTokenCookieName, "", -1)
-	h.setCookie(w, r, oauthPebbleTimelineTokenCookieName, "", -1)
-}
-
-// httpError logs an error, updates the span, and sends an HTTP error response.
-func (h *HttpHandlers) httpError(w http.ResponseWriter, span trace.Span, message string, err error, statusCode int) {
-	h.logger.Error(message, zap.Error(err))
-	if span != nil {
-		span.SetStatus(codes.Error, message)
-		span.RecordError(err)
-	}
-	http.Error(w, message, statusCode)
-}
-
-// setCookie sets an HTTP cookie with common secure defaults.
-func (h *HttpHandlers) setCookie(w http.ResponseWriter, r *http.Request, name, value string, maxAge int) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     name,
-		Value:    value,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https", // Check for TLS or proxy
-		MaxAge:   maxAge,
-		SameSite: http.SameSiteLaxMode,
-	})
-}
-
-// generateOAuthState creates a random base64 string for OAuth state.
-func generateOAuthState() (string, error) {
-	b := make([]byte, 32)
-	_, err := rand.Read(b)
-	if err != nil {
-		return "", fmt.Errorf("failed to read random bytes for state: %w", err)
-	}
-	return base64.URLEncoding.EncodeToString(b), nil
-}
-
-// getTokensFromHeader retrieves Pebble account and timeline tokens from the Authorization header.
-func getTokensFromHeader(r *http.Request) (string, string, error) {
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		return "", "", fmt.Errorf("missing Authorization header")
-	}
-	parts := utils.SplitAndTrim(authHeader, " ")
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		return "", "", fmt.Errorf("invalid Authorization header format")
-	}
-	// Base64 decode the token part
-	if len(parts[1]) == 0 {
-		return "", "", fmt.Errorf("missing token in Authorization header")
-	}
-
-	return getTokens(parts[1])
-}
-
-// getTokensFromQuery retrieves Pebble account and timeline tokens from the query parameters.
-func getTokensFromQuery(r *http.Request) (string, string, error) {
-	base := r.URL.Query().Get("token")
-	if base == "" {
-		return "", "", fmt.Errorf("missing token query parameter")
-	}
-	// Split the token into account and timeline tokens
-	if !utils.IsBase64(base) {
-		return "", "", fmt.Errorf("invalid token format in query parameter, expected base64 encoded string")
-	}
-
-	return getTokens(base)
-}
-
-// getTokens splits a base64 encoded token into account and timeline tokens.
-func getTokens(b string) (string, string, error) {
-	// Split the token into account and timeline tokens
-	if !utils.IsBase64(b) {
-		return "", "", fmt.Errorf("invalid token format in Authorization header, expected base64 encoded string")
-	}
-	// Convert base64 to string
-	decoded, err := base64.StdEncoding.DecodeString(b)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to decode base64 token: %w", err)
-	}
-	tokens := utils.SplitAndTrim(string(decoded), ":")
-	if len(tokens) != 2 {
-		return "", "", fmt.Errorf("invalid token format in Authorization header")
-	}
-	return tokens[0], tokens[1], nil
 }
