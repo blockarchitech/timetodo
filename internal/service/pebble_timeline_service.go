@@ -82,8 +82,6 @@ func (s *PebbleTimelineService) PushPin(ctx context.Context, userTimelineToken s
 		return err, 0
 	}
 
-	s.logger.Warn("pin data", zap.ByteString("pinData", pinData), zap.String("pinID", pin.ID))
-
 	url := fmt.Sprintf("%s/v1/user/pins/%s", s.apiURL, pin.ID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(pinData))
 	if err != nil {
