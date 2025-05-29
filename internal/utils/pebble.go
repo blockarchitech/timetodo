@@ -17,34 +17,20 @@
 package utils
 
 import (
-	"blockarchitech.com/timetodo/internal/storage"
 	"blockarchitech.com/timetodo/internal/types/pebble"
 	"blockarchitech.com/timetodo/internal/types/todoist"
-	"context"
 	"fmt"
 	"go.uber.org/zap"
 	"time"
 )
 
 type PebbleUtils struct {
-	tokenStore storage.TokenStore
-	logger     *zap.Logger
+	logger *zap.Logger
 }
 
-func NewPebbleUtils(tokenStore storage.TokenStore, logger *zap.Logger) *PebbleUtils {
+func NewPebbleUtils(logger *zap.Logger) *PebbleUtils {
 	return &PebbleUtils{
-		tokenStore: tokenStore,
-		logger:     logger.Named("pebble_utils"),
-	}
-}
-
-// HandleInvalidPebbleToken deletes user data when their Pebble token is invalid (410 Gone).
-func (p *PebbleUtils) HandleInvalidPebbleToken(ctx context.Context, userID int64) {
-	p.logger.Warn("Pebble Timeline token is no longer valid, deleting user account", zap.Int64("todoistUserID", userID))
-	if err := p.tokenStore.DeleteTokensByTodoistUserID(ctx, userID); err != nil {
-		p.logger.Error("Failed to delete user tokens after 410", zap.Error(err), zap.Int64("todoistUserID", userID))
-	} else {
-		p.logger.Info("Successfully deleted user tokens after 410", zap.Int64("todoistUserID", userID))
+		logger: logger.Named("pebble_utils"),
 	}
 }
 

@@ -17,6 +17,8 @@
 package storage
 
 import (
+	"blockarchitech.com/timetodo/internal/config"
+	"blockarchitech.com/timetodo/internal/utils"
 	"context"
 	"errors"
 	"fmt"
@@ -36,9 +38,10 @@ type FirestoreTokenStore struct {
 	client         *firestore.Client
 	logger         *zap.Logger
 	collectionName string
+	config         *config.Config
 }
 
-func NewFirestoreTokenStore(ctx context.Context, projectID string, logger *zap.Logger) (*FirestoreTokenStore, error) {
+func NewFirestoreTokenStore(ctx context.Context, projectID string, logger *zap.Logger, config *config.Config) (*FirestoreTokenStore, error) {
 	client, err := firestore.NewClient(ctx, projectID)
 	if err != nil {
 		logger.Error("Failed to create Firestore client", zap.String("projectID", projectID), zap.Error(err))
@@ -49,11 +52,29 @@ func NewFirestoreTokenStore(ctx context.Context, projectID string, logger *zap.L
 		client:         client,
 		logger:         logger.Named("firestore_store"),
 		collectionName: defaultTokenCollectionName,
+		config:         config,
 	}, nil
 }
 
 func (s *FirestoreTokenStore) StoreTokens(ctx context.Context, pebbleAccountToken string, tokens User) error {
 	tokens.LastUpdated = time.Now()
+
+	if s.config.SecretKey != "" {
+		encryptedTimelineToken, err := utils.Encrypt(tokens.PebbleTimelineToken, s.config.SecretKey)
+		if err != nil {
+			s.logger.Error("Failed to encrypt Pebble Timeline token", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Error(err))
+			return fmt.Errorf("failed to encrypt Pebble Timeline token: %w", err)
+		}
+		tokens.PebbleTimelineToken = encryptedTimelineToken
+
+		encryptedTodoistAccessToken, err := utils.Encrypt(tokens.TodoistAccessToken.AccessToken, s.config.SecretKey)
+		if err != nil {
+			s.logger.Error("Failed to encrypt Todoist access token", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Error(err))
+			return fmt.Errorf("failed to encrypt Todoist access token: %w", err)
+		}
+		tokens.TodoistAccessToken.AccessToken = encryptedTodoistAccessToken
+	}
+
 	_, err := s.client.Collection(s.collectionName).Doc(pebbleAccountToken).Set(ctx, tokens)
 	if err != nil {
 		s.logger.Error("Failed to store tokens in Firestore", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Error(err))
@@ -80,6 +101,40 @@ func (s *FirestoreTokenStore) GetTokensByPebbleAccount(ctx context.Context, pebb
 		return User{}, false, fmt.Errorf("failed to decode token data: %w", err)
 	}
 	s.logger.Debug("Successfully retrieved tokens", zap.String("pebbleAccountToken", pebbleAccountToken))
+
+	// Migration - if tokens are _not_ encrypted, we assume they are legacy tokens and encrypt them and then store them in the db before returning.
+	if tokens.PebbleTimelineToken != "" && !utils.IsEncrypted(tokens.PebbleTimelineToken, s.config.SecretKey) {
+		s.logger.Info("Migrating legacy Pebble Timeline token", zap.String("pebbleAccountToken", pebbleAccountToken))
+		tokens.PebbleTimelineToken, err = utils.Encrypt(tokens.PebbleTimelineToken, s.config.SecretKey)
+		if err != nil {
+			s.logger.Error("Failed to encrypt legacy Pebble Timeline token", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Error(err))
+			return User{}, false, fmt.Errorf("failed to encrypt Pebble Timeline token: %w", err)
+		}
+		_, err := s.client.Collection(s.collectionName).Doc(pebbleAccountToken).Set(ctx, tokens)
+		if err != nil {
+			s.logger.Error("Failed to update legacy Pebble Timeline token in Firestore", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Error(err))
+			return User{}, false, fmt.Errorf("failed to update document with encrypted token: %w", err)
+		}
+	}
+	if tokens.TodoistAccessToken.AccessToken != "" && !utils.IsEncrypted(tokens.TodoistAccessToken.AccessToken, s.config.SecretKey) {
+		s.logger.Info("Migrating legacy Todoist access token", zap.String("pebbleAccountToken", pebbleAccountToken))
+		tokens.TodoistAccessToken.AccessToken, err = utils.Encrypt(tokens.TodoistAccessToken.AccessToken, s.config.SecretKey)
+		if err != nil {
+			s.logger.Error("Failed to encrypt legacy Todoist access token", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Error(err))
+			return User{}, false, fmt.Errorf("failed to encrypt Todoist access token: %w", err)
+		}
+		_, err := s.client.Collection(s.collectionName).Doc(pebbleAccountToken).Set(ctx, tokens)
+		if err != nil {
+			s.logger.Error("Failed to update legacy Todoist access token in Firestore", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Error(err))
+			return User{}, false, fmt.Errorf("failed to update document with encrypted token: %w", err)
+		}
+	}
+
+	tokens, err = s.decryptTokens(&tokens)
+	if err != nil {
+		s.logger.Error("Failed to decrypt tokens", zap.String("pebbleAccountToken", pebbleAccountToken), zap.Error(err))
+		return User{}, false, fmt.Errorf("failed to decrypt tokens: %w", err)
+	}
 	return tokens, true, nil
 }
 
@@ -103,6 +158,40 @@ func (s *FirestoreTokenStore) GetTokensByTodoistUserID(ctx context.Context, todo
 		return User{}, false, fmt.Errorf("failed to decode token data: %w", err)
 	}
 	s.logger.Debug("Successfully retrieved tokens by TodoistUserID", zap.Int64("todoistUserID", todoistUserID))
+
+	// Migration - if tokens are _not_ encrypted, we assume they are legacy tokens and encrypt them and then store them in the db before returning.
+	if tokens.PebbleTimelineToken != "" && !utils.IsEncrypted(tokens.PebbleTimelineToken, s.config.SecretKey) {
+		s.logger.Info("Migrating legacy Pebble Timeline token", zap.String("pebbleAccountToken", tokens.PebbleAccountToken))
+		tokens.PebbleTimelineToken, err = utils.Encrypt(tokens.PebbleTimelineToken, s.config.SecretKey)
+		if err != nil {
+			s.logger.Error("Failed to encrypt legacy Pebble Timeline token", zap.String("pebbleAccountToken", tokens.PebbleAccountToken), zap.Error(err))
+			return User{}, false, fmt.Errorf("failed to encrypt Pebble Timeline token: %w", err)
+		}
+		_, err := s.client.Collection(s.collectionName).Doc(tokens.PebbleAccountToken).Set(ctx, tokens)
+		if err != nil {
+			s.logger.Error("Failed to update legacy Pebble Timeline token in Firestore", zap.String("pebbleAccountToken", tokens.PebbleAccountToken), zap.Error(err))
+			return User{}, false, fmt.Errorf("failed to update document with encrypted token: %w", err)
+		}
+	}
+	if tokens.TodoistAccessToken.AccessToken != "" && !utils.IsEncrypted(tokens.TodoistAccessToken.AccessToken, s.config.SecretKey) {
+		s.logger.Info("Migrating legacy Todoist access token", zap.String("pebbleAccountToken", tokens.PebbleAccountToken))
+		tokens.TodoistAccessToken.AccessToken, err = utils.Encrypt(tokens.TodoistAccessToken.AccessToken, s.config.SecretKey)
+		if err != nil {
+			s.logger.Error("Failed to encrypt legacy Todoist access token", zap.String("pebbleAccountToken", tokens.PebbleAccountToken), zap.Error(err))
+			return User{}, false, fmt.Errorf("failed to encrypt Todoist access token: %w", err)
+		}
+		_, err := s.client.Collection(s.collectionName).Doc(tokens.PebbleAccountToken).Set(ctx, tokens)
+		if err != nil {
+			s.logger.Error("Failed to update legacy Todoist access token in Firestore", zap.String("pebbleAccountToken", tokens.PebbleAccountToken), zap.Error(err))
+			return User{}, false, fmt.Errorf("failed to update document with encrypted token: %w", err)
+		}
+	}
+
+	tokens, err = s.decryptTokens(&tokens)
+	if err != nil {
+		s.logger.Error("Failed to decrypt tokens", zap.Int64("todoistUserID", todoistUserID), zap.Error(err))
+		return User{}, false, fmt.Errorf("failed to decrypt tokens: %w", err)
+	}
 	return tokens, true, nil
 }
 
@@ -146,4 +235,26 @@ func (s *FirestoreTokenStore) DeleteTokensByPebbleAccount(ctx context.Context, p
 
 func (s *FirestoreTokenStore) Close() error {
 	return s.client.Close()
+}
+
+func (s *FirestoreTokenStore) decryptTokens(tokens *User) (User, error) {
+	if s.config.SecretKey != "" {
+		if utils.IsEncrypted(tokens.PebbleTimelineToken, s.config.SecretKey) {
+			decryptedToken, err := utils.Decrypt(tokens.PebbleTimelineToken, s.config.SecretKey)
+			if err != nil {
+				s.logger.Error("Failed to decrypt Pebble Timeline token", zap.Error(err))
+				return User{}, fmt.Errorf("failed to decrypt Pebble Timeline token: %w", err)
+			}
+			tokens.PebbleTimelineToken = decryptedToken
+		}
+		if utils.IsEncrypted(tokens.TodoistAccessToken.AccessToken, s.config.SecretKey) {
+			decryptedToken, err := utils.Decrypt(tokens.TodoistAccessToken.AccessToken, s.config.SecretKey)
+			if err != nil {
+				s.logger.Error("Failed to decrypt Todoist access token", zap.Error(err))
+				return User{}, fmt.Errorf("failed to decrypt Todoist access token: %w", err)
+			}
+			tokens.TodoistAccessToken.AccessToken = decryptedToken
+		}
+	}
+	return *tokens, nil
 }

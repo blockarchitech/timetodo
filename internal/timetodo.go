@@ -120,7 +120,7 @@ func newTokenStore(lc fx.Lifecycle, logger *zap.Logger, cfg *config.Config) (sto
 			logger.Fatal("Firestore storage selected but GCP_PROJECT_ID is not set")
 			return nil, fmt.Errorf("firestore storage selected but GCP_PROJECT_ID is not set")
 		}
-		tokenStore, err = storage.NewFirestoreTokenStore(ctx, cfg.GCPProjectID, logger)
+		tokenStore, err = storage.NewFirestoreTokenStore(ctx, cfg.GCPProjectID, logger, cfg)
 		if err != nil {
 			logger.Fatal("Failed to initialize Firestore token store", zap.Error(err))
 			return nil, err

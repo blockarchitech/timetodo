@@ -68,7 +68,7 @@ func NewHttpHandlers(
 		todoistService:        todoistService,
 		Tracer:                tracer,
 		TodoistUtils:          utils.NewTodoistUtils(cfg, logger.Named("todoist_utils")),
-		PebbleUtils:           utils.NewPebbleUtils(tokenStore, logger.Named("pebble_utils")),
+		PebbleUtils:           utils.NewPebbleUtils(logger.Named("pebble_utils")),
 		AuthUtils:             utils.NewAuthUtils(),
 	}
 }
@@ -449,11 +449,21 @@ func (h *HttpHandlers) processTaskEvent(ctx context.Context, span trace.Span, us
 		span.RecordError(err)
 		// Handle 410 Gone: Token is invalid, delete the user account
 		if statusCode == http.StatusGone {
-			h.PebbleUtils.HandleInvalidPebbleToken(ctx, payload.UserID)
+			h.handleInvalidPebbleToken(ctx, payload.UserID)
 		}
 		return
 	}
 
 	h.logger.Info("Successfully pushed Pebble pin from webhook task", zap.String("pinID", pin.ID))
 	span.SetAttributes(attribute.String("app.pin_id_pushed", pin.ID))
+}
+
+// HandleInvalidPebbleToken deletes user data when their Pebble token is invalid (410 Gone).
+func (h *HttpHandlers) handleInvalidPebbleToken(ctx context.Context, userID int64) {
+	h.logger.Warn("Pebble Timeline token is no longer valid, deleting user account", zap.Int64("todoistUserID", userID))
+	if err := h.tokenStore.DeleteTokensByTodoistUserID(ctx, userID); err != nil {
+		h.logger.Error("Failed to delete user tokens after 410", zap.Error(err), zap.Int64("todoistUserID", userID))
+	} else {
+		h.logger.Info("Successfully deleted user tokens after 410", zap.Int64("todoistUserID", userID))
+	}
 }
