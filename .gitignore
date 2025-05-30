@@ -5,3 +5,6 @@
 pebble/build
 pebble/.lock-waf_linux2_build
 config.yaml
+package-lock.json
+node_modules/
+svc.json
