@@ -59,7 +59,7 @@ You have control over the information you provide to TimeToDo:
 
 * **Access and Updates:** You can typically review and update your connected account information through the TimeToDo service interface.
 * **Revoking Access:** You can revoke TimeToDo's access to your Todoist account through your Todoist account settings. You can also manage applications connected to your Rebble account through Rebble's settings. Revoking access will prevent TimeToDo from functioning.
-* **Deleting Your Information:** To request the deletion of your information stored by TimeToDo, please contact us using the information below.
+* **Deleting Your Information:** To request the deletion of your information stored by TimeToDo, you can either click the "Delete Account" button in the TimeToDo service interface or contact us directly using the contact information provided below.
 
 **8. Changes to This Privacy Policy**
 
