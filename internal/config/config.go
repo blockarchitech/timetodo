@@ -53,7 +53,7 @@ func LoadConfig() (*Config, error) {
 		Port:                 getEnv("PORT", "8080"),
 		TodoistClientID:      getEnv("TODOIST_CLIENT_ID", ""),
 		TodoistClientSecret:  getEnv("TODOIST_CLIENT_SECRET", ""),
-		AppBaseURL:           getEnv("APP_BASE_URL", "http://localhost:8080"),
+		AppBaseURL:           getEnv("APP_BASE_URL", "https://timetodo-282379823777.us-central1.run.app"),
 		SecretKey:            getEnv("SECRET_KEY", ""),
 		StorageType:          getEnv("STORAGE_TYPE", "inmemory"),
 		GCPProjectID:         getEnv("GCP_PROJECT_ID", ""),
@@ -73,7 +73,7 @@ func LoadConfig() (*Config, error) {
 	cfg.TodoistOAuthConfig = &oauth2.Config{
 		ClientID:     cfg.TodoistClientID,
 		ClientSecret: cfg.TodoistClientSecret,
-		RedirectURL:  cfg.AppBaseURL + "/auth/todoist/callback",
+		RedirectURL:  cfg.AppBaseURL + "/auth/callback",
 		Scopes:       []string{"data:read"},
 
 		Endpoint: oauth2.Endpoint{
