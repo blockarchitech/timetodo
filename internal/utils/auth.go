@@ -17,11 +17,12 @@
 package utils
 
 import (
-	"blockarchitech.com/timetodo/internal/config"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
 	"net/http"
+
+	"blockarchitech.com/timetodo/internal/config"
 )
 
 type AuthUtils struct{}
@@ -31,7 +32,7 @@ func NewAuthUtils() *AuthUtils {
 	return &AuthUtils{}
 }
 
-// setCookie sets an HTTP cookie with common secure defaults.
+// SetCookie sets an HTTP cookie with common secure defaults.
 func (a *AuthUtils) SetCookie(w http.ResponseWriter, r *http.Request, name, value string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
@@ -44,7 +45,7 @@ func (a *AuthUtils) SetCookie(w http.ResponseWriter, r *http.Request, name, valu
 	})
 }
 
-// generateOAuthState creates a random base64 string for OAuth state.
+// GenerateOAuthState creates a random base64 string for OAuth state.
 func (a *AuthUtils) GenerateOAuthState() (string, error) {
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
@@ -54,7 +55,7 @@ func (a *AuthUtils) GenerateOAuthState() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
-// getTokensFromHeader retrieves Pebble account and timeline tokens from the Authorization header.
+// GetTokensFromHeader retrieves Pebble account and timeline tokens from the Authorization header.
 func (a *AuthUtils) GetTokensFromHeader(r *http.Request) (string, string, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
@@ -72,7 +73,7 @@ func (a *AuthUtils) GetTokensFromHeader(r *http.Request) (string, string, error)
 	return a.getTokens(parts[1])
 }
 
-// getTokensFromQuery retrieves Pebble account and timeline tokens from the query parameters.
+// GetTokensFromQuery retrieves Pebble account and timeline tokens from the query parameters.
 func (a *AuthUtils) GetTokensFromQuery(r *http.Request) (string, string, error) {
 	base := r.URL.Query().Get("token")
 	if base == "" {
@@ -84,6 +85,16 @@ func (a *AuthUtils) GetTokensFromQuery(r *http.Request) (string, string, error) 
 	}
 
 	return a.getTokens(base)
+}
+
+// GetTokensFromPebbleHeaders retrieves Pebble account and timeline tokens from a Timeline Action request.
+func (a *AuthUtils) GetTokensFromPebbleHeaders(r *http.Request) (string, string, error) {
+	accountToken := r.Header.Get("X-Pebble-Account-Token")
+	timelineToken := r.Header.Get("X-Pebble-Timeline-Token")
+	if accountToken == "" || timelineToken == "" {
+		return "", "", fmt.Errorf("missing X-Pebble-Account-Token or X-Pebble-Timeline-Token header")
+	}
+	return accountToken, timelineToken, nil
 }
 
 // getTokens splits a base64 encoded token into account and timeline tokens.
@@ -104,7 +115,7 @@ func (a *AuthUtils) getTokens(b string) (string, string, error) {
 	return tokens[0], tokens[1], nil
 }
 
-// getPebbleTokensFromCookies retrieves Pebble account and timeline tokens from request cookies.
+// GetPebbleTokensFromCookies retrieves Pebble account and timeline tokens from request cookies.
 func (a *AuthUtils) GetPebbleTokensFromCookies(r *http.Request) (string, string, error) {
 	pebbleAccountTokenCookie, errAcc := r.Cookie(config.OauthPebbleAccountTokenCookieName)
 	pebbleTimelineTokenCookie, errTime := r.Cookie(config.OauthPebbleTimelineTokenCookieName)
@@ -119,7 +130,7 @@ func (a *AuthUtils) GetPebbleTokensFromCookies(r *http.Request) (string, string,
 	return pebbleAccountTokenCookie.Value, pebbleTimelineTokenCookie.Value, nil
 }
 
-// clearOAuthCookies removes OAuth-related cookies.
+// ClearOAuthCookies removes OAuth-related cookies.
 func (a *AuthUtils) ClearOAuthCookies(w http.ResponseWriter, r *http.Request) {
 	a.SetCookie(w, r, config.OauthStateCookieName, "", -1)
 	a.SetCookie(w, r, config.OauthPebbleAccountTokenCookieName, "", -1)

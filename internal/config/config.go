@@ -45,6 +45,8 @@ type Config struct {
 	OtelExporterEndpoint string
 	TodoistOAuthConfig   *oauth2.Config
 	Version              string
+	CORSAllowedOrigins   string // comma-separated list
+	ConfigUrl            string
 }
 
 // LoadConfig loads configuration from environment variables.
@@ -60,6 +62,8 @@ func LoadConfig() (*Config, error) {
 		PebbleTimelineAPIURL: getEnv("PEBBLE_TIMELINE_API_URL", "https://timeline-sync.rebble.io"),
 		OtelExporterEndpoint: getEnv("OTEL_EXPORTER_ENDPOINT", ""),
 		Version:              getEnv("VERSION", "dev"),
+		CORSAllowedOrigins:   getEnv("CORS_ALLOWED_ORIGINS", "https://timetodo-282379823777.us-central1.run.app"),
+		ConfigUrl:            getEnv("CONFIG_URL", "https://timetodo-282379823777.us-central1.run.app/config"),
 	}
 
 	if cfg.TodoistClientID == "" || cfg.TodoistClientSecret == "" || cfg.SecretKey == "" {
@@ -73,8 +77,8 @@ func LoadConfig() (*Config, error) {
 	cfg.TodoistOAuthConfig = &oauth2.Config{
 		ClientID:     cfg.TodoistClientID,
 		ClientSecret: cfg.TodoistClientSecret,
-		RedirectURL:  cfg.AppBaseURL + "/auth/callback",
-		Scopes:       []string{"data:read"},
+		RedirectURL:  cfg.AppBaseURL + "/api/v1/todoist/callback",
+		Scopes:       []string{"data:read_write"},
 
 		Endpoint: oauth2.Endpoint{
 			AuthURL:  "https://todoist.com/oauth/authorize",

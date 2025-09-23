@@ -62,7 +62,8 @@ type PinID struct {
 }
 
 // PushPin sends a pin to the Pebble Timeline API.
-func (s *PebbleTimelineService) PushPin(ctx context.Context, userTimelineToken string, pinData []byte) (error, int) {
+// Returns: HTTP status code from Pebble API (0 if request not made) and an error if any.
+func (s *PebbleTimelineService) PushPin(ctx context.Context, userTimelineToken string, pinData []byte) (int, error) {
 	ctx, span := s.tracer.Start(ctx, "PebbleTimelineService.PushPin")
 	defer span.End()
 
@@ -71,7 +72,7 @@ func (s *PebbleTimelineService) PushPin(ctx context.Context, userTimelineToken s
 		s.logger.Error("Failed to unmarshal pin data to get ID", zap.Error(err), zap.ByteString("pinData", pinData))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Unmarshal pin data failed")
-		return fmt.Errorf("failed to unmarshal pin data for ID: %w", err), 0
+		return 0, fmt.Errorf("failed to unmarshal pin data for ID: %w", err)
 	}
 
 	if pin.ID == "" {
@@ -79,7 +80,7 @@ func (s *PebbleTimelineService) PushPin(ctx context.Context, userTimelineToken s
 		s.logger.Error("Pin ID is missing", zap.Error(err), zap.ByteString("pinData", pinData))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Pin ID missing")
-		return err, 0
+		return 0, err
 	}
 
 	url := fmt.Sprintf("%s/v1/user/pins/%s", s.apiURL, pin.ID)
@@ -88,7 +89,7 @@ func (s *PebbleTimelineService) PushPin(ctx context.Context, userTimelineToken s
 		s.logger.Error("Failed to create PushPin request", zap.String("url", url), zap.Error(err))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Create request failed")
-		return fmt.Errorf("failed to create request: %w", err), 0
+		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -106,7 +107,7 @@ func (s *PebbleTimelineService) PushPin(ctx context.Context, userTimelineToken s
 		s.logger.Error("Failed to send PushPin request", zap.String("url", url), zap.Error(err))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "HTTP request failed")
-		return fmt.Errorf("failed to send request: %w", err), 0
+		return 0, fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -122,10 +123,71 @@ func (s *PebbleTimelineService) PushPin(ctx context.Context, userTimelineToken s
 		)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "API returned non-success")
-		return err, resp.StatusCode // if the status code is 410, the webhook handler must delete the account as the user has removed the app from their Pebble
+		return resp.StatusCode, err // if the status code is 410, the webhook handler must delete the account as the user has removed the app from their Pebble
 	}
 
 	s.logger.Info("Successfully pushed pin to Pebble Timeline", zap.String("pinID", pin.ID), zap.Int("statusCode", resp.StatusCode))
 	span.SetStatus(codes.Ok, "Pin pushed successfully")
-	return nil, resp.StatusCode
+	return resp.StatusCode, nil
+}
+
+// DeletePin removes a pin from the Pebble Timeline API.
+// Returns: HTTP status code from Pebble API (0 if request not made) and an error if any.
+func (s *PebbleTimelineService) DeletePin(ctx context.Context, userTimelineToken string, pinID string) (int, error) {
+	ctx, span := s.tracer.Start(ctx, "PebbleTimelineService.DeletePin")
+	defer span.End()
+
+	if pinID == "" {
+		err := fmt.Errorf("pin ID is empty")
+		s.logger.Error("Pin ID is missing for delete", zap.Error(err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Pin ID missing")
+		return 0, err
+	}
+
+	url := fmt.Sprintf("%s/v1/user/pins/%s", s.apiURL, pinID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		s.logger.Error("Failed to create DeletePin request", zap.String("url", url), zap.Error(err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Create request failed")
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("X-User-Token", userTimelineToken)
+
+	span.SetAttributes(
+		attribute.String("http.url", url),
+		attribute.String("pin.id", pinID),
+	)
+
+	s.logger.Debug("Deleting pin from Pebble Timeline API", zap.String("url", url), zap.String("pinID", pinID))
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		s.logger.Error("Failed to send DeletePin request", zap.String("url", url), zap.Error(err))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "HTTP request failed")
+		return 0, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		err := fmt.Errorf("Pebble Timeline API returned non-success status %d: %s", resp.StatusCode, string(bodyBytes))
+		s.logger.Error("Pebble Timeline API error (delete)",
+			zap.Int("statusCode", resp.StatusCode),
+			zap.String("url", url),
+			zap.String("responseBody", string(bodyBytes)),
+		)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "API returned non-success")
+		return resp.StatusCode, err
+	}
+
+	s.logger.Info("Successfully deleted Pebble pin", zap.String("pinID", pinID), zap.Int("statusCode", resp.StatusCode))
+	span.SetStatus(codes.Ok, "Pin deleted successfully")
+	return resp.StatusCode, nil
 }

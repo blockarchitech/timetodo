@@ -17,27 +17,41 @@
 package utils
 
 import (
+	"fmt"
+	"net/http"
+	"time"
+
+	"blockarchitech.com/timetodo/internal/config"
 	"blockarchitech.com/timetodo/internal/types/pebble"
 	"blockarchitech.com/timetodo/internal/types/todoist"
-	"fmt"
 	"go.uber.org/zap"
-	"time"
 )
 
 type PebbleUtils struct {
 	logger *zap.Logger
+	config *config.Config
 }
 
-func NewPebbleUtils(logger *zap.Logger) *PebbleUtils {
+func NewPebbleUtils(logger *zap.Logger, config *config.Config) *PebbleUtils {
 	return &PebbleUtils{
 		logger: logger.Named("pebble_utils"),
+		config: config,
 	}
 }
 
 // CreatePebblePin constructs a Pebble Pin object from task data.
 func (p *PebbleUtils) CreatePebblePin(userID int64, taskData todoist.TaskEventData, dueTime time.Time) pebble.Pin {
+	pinID := fmt.Sprintf("todoist-%d-%s", userID, taskData.ID)
+	// Build HTTP actions that call back into our server.
+	actionURL := p.config.AppBaseURL + "/api/v1/pebble/action" // keep in sync with handler.RoutePebbleAction
+	actions := []interface{}{
+		pebble.HttpPinAction{PinAction: pebble.PinAction{Title: "Complete", Type: "http"}, URL: actionURL, Method: http.MethodPost, Headers: map[string]string{"Content-Type": "application/json"}, BodyJson: map[string]string{"id": pinID, "pinId": pinID, "actionId": "complete"}, SuccessText: "Completed", SuccessIcon: "system://images/RESULT_MUTE", FailureText: "Failed", FailureIcon: "system://images/RESULT_FAILED"},
+		pebble.HttpPinAction{PinAction: pebble.PinAction{Title: "Today", Type: "http"}, URL: actionURL, Method: http.MethodPost, Headers: map[string]string{"Content-Type": "application/json"}, BodyJson: map[string]string{"id": pinID, "pinId": pinID, "actionId": "today"}, SuccessText: "Rescheduled", SuccessIcon: "system://images/TIMELINE_CALENDAR", FailureText: "Failed", FailureIcon: "system://images/RESULT_FAILED"},
+		pebble.HttpPinAction{PinAction: pebble.PinAction{Title: "Tomorrow", Type: "http"}, URL: actionURL, Method: http.MethodPost, Headers: map[string]string{"Content-Type": "application/json"}, BodyJson: map[string]string{"id": pinID, "pinId": pinID, "actionId": "tomorrow"}, SuccessText: "Rescheduled", SuccessIcon: "system://images/TIMELINE_CALENDAR", FailureText: "Failed", FailureIcon: "system://images/RESULT_FAILED"},
+		pebble.HttpPinAction{PinAction: pebble.PinAction{Title: "Weekend", Type: "http"}, URL: actionURL, Method: http.MethodPost, Headers: map[string]string{"Content-Type": "application/json"}, BodyJson: map[string]string{"id": pinID, "pinId": pinID, "actionId": "next_weekend"}, SuccessText: "Rescheduled", SuccessIcon: "system://images/TIMELINE_CALENDAR", FailureText: "Failed", FailureIcon: "system://images/RESULT_FAILED"},
+	}
 	return pebble.Pin{
-		ID:   fmt.Sprintf("todoist-%d-%s", userID, taskData.ID),
+		ID:   pinID,
 		Time: dueTime.UTC().Format(time.RFC3339),
 		Layout: pebble.PinLayout{
 			Type:     "genericPin",
@@ -45,5 +59,6 @@ func (p *PebbleUtils) CreatePebblePin(userID int64, taskData todoist.TaskEventDa
 			Body:     taskData.Description,
 			TinyIcon: "system://images/NOTIFICATION_FLAG",
 		},
+		Actions: actions,
 	}
 }

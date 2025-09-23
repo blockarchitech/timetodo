@@ -17,6 +17,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -62,7 +63,7 @@ func NewTodoistService(tracer trace.Tracer, logger *zap.Logger, config *config.C
 	}
 }
 
-// todoistUserResponse is a minimal struct to unmarshal the user object from Todoist Sync API.
+// TodoistUserResponse is a minimal struct to unmarshal the user object from Todoist Sync API.
 type TodoistUserResponse struct {
 	User struct {
 		ID           int64  `json:"id,string"` // Use json.Number to handle potential string or number
@@ -76,7 +77,7 @@ type TodoistUserResponse struct {
 	SyncToken string `json:"sync_token"`
 }
 
-// GetUserID fetches the Todoist User ID for the given access token.
+// GetUser fetches the Todoist user information for the given access token.
 func (s *TodoistService) GetUser(ctx context.Context, accessToken string) (TodoistUserResponse, error) {
 	s.logger.Debug("Fetching Todoist User ID")
 
@@ -164,5 +165,58 @@ func (s *TodoistService) RevokeToken(ctx context.Context, accessToken string) er
 		return err
 	}
 	s.logger.Info("Successfully revoked Todoist access token")
+	return nil
+}
+
+// CloseTask completes a task.
+func (s *TodoistService) CloseTask(ctx context.Context, accessToken string, taskID string) error {
+	reqCtx, cancel := context.WithTimeout(ctx, s.apiTimeout)
+	defer cancel()
+	closeUrl := fmt.Sprintf("%s/%s/close", todoistAPIBaseURL, taskID)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, closeUrl, nil)
+	if err != nil {
+		s.logger.Error("Failed to create close task request", zap.Error(err), zap.String("taskID", taskID))
+		return fmt.Errorf("failed to create close task request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := s.client.Do(req)
+	if err != nil {
+		s.logger.Error("Close task request failed", zap.Error(err), zap.String("taskID", taskID))
+		return fmt.Errorf("close task request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		b, _ := io.ReadAll(resp.Body)
+		s.logger.Error("Todoist close task failed", zap.Int("status", resp.StatusCode), zap.String("body", string(b)))
+		return fmt.Errorf("todoist close task failed: %d %s", resp.StatusCode, string(b))
+	}
+	return nil
+}
+
+// UpdateTaskDueString reschedules a task by setting due_string.
+func (s *TodoistService) UpdateTaskDueString(ctx context.Context, accessToken string, taskID string, dueString string) error {
+	reqCtx, cancel := context.WithTimeout(ctx, s.apiTimeout)
+	defer cancel()
+	updateTaskUrl := fmt.Sprintf("%s/%s", todoistAPIBaseURL, taskID)
+	body := map[string]string{"due_string": dueString}
+	buf, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, updateTaskUrl, bytes.NewReader(buf))
+	if err != nil {
+		s.logger.Error("Failed to create update task request", zap.Error(err), zap.String("taskID", taskID))
+		return fmt.Errorf("failed to create update task request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.client.Do(req)
+	if err != nil {
+		s.logger.Error("Update task request failed", zap.Error(err), zap.String("taskID", taskID))
+		return fmt.Errorf("update task request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		s.logger.Error("Todoist update task failed", zap.Int("status", resp.StatusCode), zap.String("body", string(b)))
+		return fmt.Errorf("todoist update task failed: %d %s", resp.StatusCode, string(b))
+	}
 	return nil
 }

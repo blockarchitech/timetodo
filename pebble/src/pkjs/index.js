@@ -14,67 +14,22 @@
  *    limitations under the License.
  */
 
-var loggedInConfig = require('./config-loggedin.json');
-var loggedOutConfig = require('./config-loggedout.json');
-var customClay = require('./custom-clay.js');
-
-var Clay = require('pebble-clay');
-
-var clay = new Clay(loggedOutConfig, customClay, { autoHandleEvents: false, userData: {
-    abc: '123',
-} });
 Pebble.addEventListener('showConfiguration', function (e) {
     Pebble.getTimelineToken(function (timeline_token) {
         var account_token = Pebble.getAccountToken();
-        var token = btoa(account_token + ':' + timeline_token);
-        var auth_header = 'Bearer ' + token;
-
-        var userData = {
-            token: token
-        };
-
-        clay.meta.userData = userData;
-
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', 'https://timetodo-282379823777.us-central1.run.app/api/v1/me', true);
-        xhr.setRequestHeader('Authorization', auth_header);
-        xhr.onload = function () {
-            if (xhr.status === 200) {
-                // User is logged in, show logged-in config
-                clay.config = loggedInConfig;   
-                Pebble.openURL(clay.generateUrl());
-            } else if (xhr.status === 401) {
-                // User is not logged in, show not-logged-in config
-                clay.config = loggedOutConfig;
-                Pebble.openURL(clay.generateUrl());
-            } else {
-                clay.config = loggedOutConfig;
-                Pebble.openURL(clay.generateUrl());
-            }
-        };
-        xhr.onerror = function () {
-            console.error('Error fetching user data: ' + xhr.statusText);
-            clay.config = loggedOutConfig;
-            Pebble.openURL(clay.generateUrl());
-        };
-        xhr.send();
+        var url = 'https://timetodo-282379823777.us-central1.run.app/config' +
+            '?timeline=' + encodeURIComponent(timeline_token) +
+            '&account=' + encodeURIComponent(account_token);
+        Pebble.openURL(url);
     }, function (error) {
         console.error('Error getting timeline token: ' + error);
-        Pebble.openURL(encodeURIComponent("data:text/html,<html><body><h1>Error</h1><p>Failed to retrieve timeline token. Try to reinstall TimeToDo.</p></body></html>"));
+        Pebble.openURL(encodeURIComponent("data:text/html,<html><body><h1>Error</h1><p>Failed to retrieve timeline token. Try to reinstall TimeToDo. Please note: TimeToDo does not currently work on the Core Devices mobile app.</p></body></html>"));
     });
 });
 
 Pebble.addEventListener('webviewclosed', function (e) {
     if (e && !e.response) {
         return;
-    }
-
-    // Get the keys and values from each config item
-    var dict = clay.getSettings(e.response);
-
-    var response = JSON.parse(e.response);
-    if (response.status === 'success') {
-        Pebble.showSimpleNotificationOnPebble('TimeToDo', 'Login success! Your new Todoist tasks will be synced to your timeline.');
     }
 
     Pebble.sendAppMessage({
@@ -84,7 +39,5 @@ Pebble.addEventListener('webviewclosed', function (e) {
     }, function (error) {
         // oh no, anyway
     });
-
-
 });
 
